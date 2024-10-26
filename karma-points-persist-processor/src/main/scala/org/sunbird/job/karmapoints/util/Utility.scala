@@ -61,6 +61,23 @@ object Utility {
                          config: KarmaPointsProcessorConfig,
                          cassandraUtil: CassandraUtil): Unit = {
     val creditDate = System.currentTimeMillis()
+    insertKarmaPoints(userId,
+      contextType,
+      operationType,
+      contextId,
+      points,
+      addInfo, creditDate)
+  }
+
+  def insertKarmaPoints(userId: String,
+                        contextType: String,
+                        operationType: String,
+                        contextId: String,
+                        points: Int,
+                        addInfo: String, creditDate: Long
+                       )(implicit metrics: Metrics,
+                         config: KarmaPointsProcessorConfig,
+                         cassandraUtil: CassandraUtil): Unit = {
     val result = updatePoints(userId, contextType, operationType, contextId, points, addInfo, creditDate)( config, cassandraUtil)
     if (result) {
       insertKarmaCreditLookup(userId, contextType, operationType, contextId, creditDate)(config, cassandraUtil)

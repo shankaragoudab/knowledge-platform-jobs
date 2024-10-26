@@ -66,10 +66,10 @@ class EventAttendedProcessorFn(config: KarmaPointsProcessorConfig, httpUtil: Htt
        logger.info("Karma Points were not allocated as the event's endDate " + endDate + " has passed, and the event was consumed on " + etsDate)
       return
     }
-    kpOnUserEventAttended(usrId , config.CONTEXT_TYPE_EVENT ,config.OPERATION_TYPE_EVENT,event_Id,eventName)(metrics)
+    kpOnUserEventAttended(usrId, config.CONTEXT_TYPE_EVENT, config.OPERATION_TYPE_EVENT, event_Id, eventName, etsDate.getTime)(metrics)
   }
 
-  private def kpOnUserEventAttended(userId : String, contextType : String, operationType:String, contextId:String,eventName:String)(metrics: Metrics) :Unit = {
+  private def kpOnUserEventAttended(userId: String, contextType: String, operationType: String, contextId: String, eventName: String, creditDate: Long)(metrics: Metrics): Unit = {
     val points: Int = config.eventQuotaKarmaPoints
     val addInfoMap = new util.HashMap[String, AnyRef]
     addInfoMap.put(config.ADDINFO_EVENTNAME, eventName)
@@ -79,7 +79,7 @@ class EventAttendedProcessorFn(config: KarmaPointsProcessorConfig, httpUtil: Htt
       case e: JsonProcessingException =>
         throw new RuntimeException(e)
     }
-    insertKarmaPoints(userId, contextType ,operationType,contextId,points,addInfo)(metrics,config, cassandraUtil)
+    insertKarmaPoints(userId, contextType, operationType, contextId, points, addInfo, creditDate)(metrics, config, cassandraUtil)
     updateKarmaSummary(userId, points)( config, cassandraUtil)
   }
 }
