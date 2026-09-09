@@ -91,7 +91,10 @@ class CourseCompletionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
                               (implicit metrics: Metrics): Boolean = {
     if (!config.COURSE.equals(contextType)) return false
     if (config.enableKarmaPointsCapping && acbpExpiry.isEmpty && cassandraUtil.hasReachedNonACBPMonthlyCutOff(userId)) return false
-    if (cassandraUtil.doesEntryExist(userId, contextType, operationType, courseId)) return false
+    if (cassandraUtil.doesEntryExist(userId, contextType, operationType, courseId)) {
+      logger.info(s"Karma points already awarded for userId=$userId, courseId=$courseId, operationType=$operationType - skipping duplicate")
+      return false
+    }
     true
   }
 

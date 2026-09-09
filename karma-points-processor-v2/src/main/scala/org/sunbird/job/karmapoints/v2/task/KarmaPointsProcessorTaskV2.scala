@@ -79,6 +79,7 @@ class KarmaPointsKeySelector(config: KarmaPointsV2Config) extends KeySelector[Un
     case config.EVENT_TYPE_FIRST_LOGIN => event.dataEdataString(config.ID)
     case config.EVENT_TYPE_UNENROLMENT => event.dataEdataString("userIds")
     case config.EVENT_TYPE_COURSE_COMPLETION => event.edataStringArrayFirst("userIds")
+    case config.EVENT_TYPE_POINTS_CONVERSION | config.EVENT_TYPE_COINS_REDEMPTION => event.dataString("userId")
     case _ => event.userId
   }
 }

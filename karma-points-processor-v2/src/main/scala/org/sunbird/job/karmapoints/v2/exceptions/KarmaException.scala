@@ -45,6 +45,12 @@ case class MissingPayloadException(override val message: String, override val ca
 case class UnknownEventTypeException(override val message: String, override val cause: Option[Throwable] = None)
   extends DataQualityException(message, cause)
 
+/** A payload field is present and non-empty but its value fails a business/contract constraint
+ * (e.g. contextType/operation/actionType must equal a specific literal, pointsToConvert must be
+ * > 0) - distinct from [[MissingPayloadException]], which is for absent/empty fields. */
+case class InvalidPayloadException(override val message: String, override val cause: Option[Throwable] = None)
+  extends DataQualityException(message, cause)
+
 // ---- System exceptions ----
 
 case class CassandraException(override val message: String, override val cause: Option[Throwable] = None)

@@ -45,6 +45,8 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
   @transient private var acbpClaimHandler: ACBPClaimHandler = _
   @transient private var eventAttendedHandler: EventAttendedHandler = _
   @transient private var unenrolmentHandler: UnenrolmentHandler = _
+  @transient private var pointsConversionHandler: PointsConversionHandler = _
+  @transient private var coinsRedemptionHandler: CoinsRedemptionHandler = _
 
   override def open(parameters: Configuration): Unit = {
     super.open(parameters)
@@ -56,7 +58,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     val redisConnect = new RedisConnect(config, Option(config.metaRedisHost), Option(config.metaRedisPort))
     val dataCache = new DataCache(config, redisConnect, config.cacheDbId, List())
     dataCache.init()
-    redisUtil = new RedisUtil(dataCache)
+    redisUtil = new RedisUtil(dataCache, config)
 
     failedEventProducer = new FailedEventProducer(config)
     failedEventProducer.init()
@@ -70,6 +72,8 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     acbpClaimHandler = new ACBPClaimHandler(config, cassandraUtil, redisUtil, externalServiceClient)
     eventAttendedHandler = new EventAttendedHandler(config, cassandraUtil, redisUtil, externalServiceClient)
     unenrolmentHandler = new UnenrolmentHandler(config, cassandraUtil, redisUtil)
+    pointsConversionHandler = new PointsConversionHandler(config, cassandraUtil, redisUtil)
+    coinsRedemptionHandler = new CoinsRedemptionHandler(config, cassandraUtil, redisUtil)
   }
 
   override def close(): Unit = {
@@ -148,23 +152,12 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     case config.EVENT_TYPE_FIRST_LOGIN => event.dataEdataString("id")
     case config.EVENT_TYPE_UNENROLMENT => event.dataEdataString("userIds")
     case config.EVENT_TYPE_COURSE_COMPLETION => event.edataStringArrayFirst("userIds")
+    case config.EVENT_TYPE_POINTS_CONVERSION | config.EVENT_TYPE_COINS_REDEMPTION => event.dataString("userId")
     case _ =>
       val topLevel = event.userId
       if (StringUtils.isNotEmpty(topLevel)) topLevel else event.edataString("userId")
   }
 
-  /* private def validateEvent(event: UnifiedEvent): Unit = {
-     if (StringUtils.isEmpty(event.eventType)) {
-       throw MissingEventTypeException(s"eventType is missing/empty, mid=${event.mid()}")
-     }
-     val userId = extractUserId(event)
-     if (StringUtils.isEmpty(userId)) {
-       throw InvalidUserIdException(s"userId is missing/empty for eventType=${event.eventType}, mid=${event.mid()}")
-     }
-     if (event.edata == null || event.edata.isEmpty) {
-       throw MissingPayloadException(s"edata is missing/empty for eventType=${event.eventType}, userId=$userId")
-     }
-   }*/
   private def validateEvent(event: UnifiedEvent): Unit = {
     if (StringUtils.isEmpty(event.eventType)) {
       logger.warn(
@@ -185,6 +178,8 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       case config.EVENT_TYPE_ACBP_CLAIM => acbpClaimHandler.handle(event)
       case config.EVENT_TYPE_EVENT_ATTENDED => eventAttendedHandler.handle(event)
       case config.EVENT_TYPE_UNENROLMENT => unenrolmentHandler.handle(event)
+      case config.EVENT_TYPE_POINTS_CONVERSION => pointsConversionHandler.handle(event)
+      case config.EVENT_TYPE_COINS_REDEMPTION => coinsRedemptionHandler.handle(event)
       case other => throw UnknownEventTypeException(s"Unknown eventType: '$other' for userId=${event.userId}")
     }
   }
@@ -211,5 +206,15 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     this.acbpClaimHandler = new ACBPClaimHandler(config, cassandraUtil, redisUtil, externalServiceClient)
     this.eventAttendedHandler = new EventAttendedHandler(config, cassandraUtil, redisUtil, externalServiceClient)
     this.unenrolmentHandler = new UnenrolmentHandler(config, cassandraUtil, redisUtil)
+    this.pointsConversionHandler = new PointsConversionHandler(config, cassandraUtil, redisUtil)
+    this.coinsRedemptionHandler = new CoinsRedemptionHandler(config, cassandraUtil, redisUtil)
   }
+
+  /**
+   * Test-only accessors so [[org.sunbird.job.karmapoints.v2.EventRoutingSpec]] can assert routing
+   * reached the right handler instance without exposing mutable handler fields more broadly.
+   */
+  private[v2] def pointsConversionHandlerForTest: PointsConversionHandler = pointsConversionHandler
+
+  private[v2] def coinsRedemptionHandlerForTest: CoinsRedemptionHandler = coinsRedemptionHandler
 }

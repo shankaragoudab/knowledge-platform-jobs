@@ -26,6 +26,7 @@ class FirstLoginHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraUti
       return
     }
     if (cassandraUtil.doesEntryExist(userId, config.OPERATION_TYPE_FIRST_LOGIN, config.OPERATION_TYPE_FIRST_LOGIN, userId)) {
+      logger.info(s"FIRST_LOGIN karma points already awarded for userId=$userId - skipping duplicate")
       metrics.incCounter(config.skippedEventCount)
       return
     }

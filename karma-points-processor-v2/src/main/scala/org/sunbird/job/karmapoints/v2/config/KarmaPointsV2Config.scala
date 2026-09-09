@@ -35,6 +35,14 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val user_assessment_data_table: String = config.getString("cassandra.user_assessment_data.table")
   val course_batch_table: String = config.getString("cassandra.course_batch.table")
 
+  val user_karma_coin_lookup_table: String = config.getString("cassandra.user_karma_coin_lookup.table")
+
+  val user_karma_coin_wallet_table: String = config.getString("cassandra.user_karma_coin_wallet.table")
+  val user_karma_coin_monthly_summary_table: String = config.getString("cassandra.user_karma_coin_monthly_summary.table")
+
+  // Karma Coin transaction ledger - same `sunbird` keyspace, own table.
+  val user_karma_coin_transactions_table: String = config.getString("cassandra.user_karma_coin_transactions.table")
+
   // Redis
   val cacheDbId: Int = if (config.hasPath("redis.database.karmaPointCache.id")) config.getInt("redis.database.karmaPointCache.id") else 0
   val metaRedisHost: String = config.getString("redis.host")
@@ -71,6 +79,32 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val EVENT_TYPE_EVENT_ATTENDED = "EVENT_ATTENDED"
   val EVENT_TYPE_UNENROLMENT = "UNENROLMENT"
 
+  val EVENT_TYPE_POINTS_CONVERSION = "POINTS_CONVERSION"
+  val EVENT_TYPE_COINS_REDEMPTION = "COINS_REDEMPTION"
+
+  val OPERATION_CREDIT = "CREDIT"
+  val OPERATION_DEBIT = "DEBIT"
+  val ACTION_TYPE_POINTS_REDEMPTION = "POINTS_REDEMPTION"
+
+  val pointsConversionMonthlyLimit: Int =
+    if (config.hasPath("karmaCoin.pointsConversion.monthlyLimit")) config.getInt("karmaCoin.pointsConversion.monthlyLimit") else 300
+
+  val karmaCoinCacheTTLSeconds: Int =
+    if (config.hasPath("karmaCoin.redis.cacheTtlSeconds")) config.getInt("karmaCoin.redis.cacheTtlSeconds") else 3600
+  val karmaCoinRequestClaimTTLSeconds: Int =
+    if (config.hasPath("karmaCoin.redis.requestClaimTtlSeconds")) config.getInt("karmaCoin.redis.requestClaimTtlSeconds") else 14400
+
+  val pointsConversionDedupEnabled: Boolean =
+    if (config.hasPath("karmaCoin.redis.pointsConversionDedupEnabled"))
+      config.getBoolean("karmaCoin.redis.pointsConversionDedupEnabled")
+    else
+      true
+  val coinsRedemptionDedupEnabled: Boolean =
+    if (config.hasPath("karmaCoin.redis.coinsRedemptionDedupEnabled"))
+      config.getBoolean("karmaCoin.redis.coinsRedemptionDedupEnabled")
+    else
+      true
+
   // Cassandra column / field constants (same DB schema as V1)
   val HIERARCHY = "hierarchy"
   val COURSE_ID = "courseId"
@@ -87,6 +121,7 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val POINTS = "points"
 
   val DB_COLUMN_USER_KARMA_POINTS_KEY = "user_karma_points_key"
+  val DB_COLUMN_USER_KARMA_COIN_KEY = "user_karma_coin_key"
   val DB_COLUMN_OPERATION_TYPE = "operation_type"
   val DB_COLUMN_USERID = "userid"
   val DB_COLUMN_CREDIT_DATE = "credit_date"
@@ -140,6 +175,44 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val EVENT = "event"
   val NAME = "name"
   val PIPE = "|"
+
+  val STATUS = "status"
+  val STATUS_PROCESSING = "PROCESSING"
+  val STATUS_FAILED = "FAILED"
+  val STATUS_SUCCESS = "SUCCESS"
+
+  val TOTAL_EARNED = "total_earned"
+  val TOTAL_REDEEMED = "total_redeemed"
+  val YEAR_MONTH = "year_month"
+  val POINTS_CONVERTED = "points_converted"
+  val UPDATED_ON = "updated_on"
+  val YYYY_DASH_MM = "yyyy-MM"
+  val CREATED_AT = "created_at"
+  val DB_COLUMN_TRANSACTION_ID = "transaction_id"
+  val TYPE = "type"
+  val AMOUNT = "amount"
+  val BALANCE_AFTER = "balance_after"
+  val ACTION_TYPE = "action_type"
+
+  val ADDINFO_ERROR_CODE = "errorCode"
+  val ADDINFO_ERROR_MESSAGE = "errorMessage"
+  val ADDINFO_TRANSACTION_ID = "transactionId"
+  val ADDINFO_POINTS_CONVERTED = "pointsConverted"
+  val ADDINFO_POINTS_USED = "pointsUsed"
+  val ADDINFO_RATIO = "ratio"
+  val RATIO_ONE_TO_ONE = "1:1"
+
+  val ADDINFO_COURSE_NAME = "courseName"
+  val ADDINFO_PROVIDER_NAME = "providerName"
+
+  val ADDINFO_CREATED_AT = "createdAt"
+  val ADDINFO_TARGET_TOTAL_EARNED = "targetTotalEarned"
+  val ADDINFO_TARGET_TOTAL_REDEEMED = "targetTotalRedeemed"
+  val ADDINFO_TARGET_YEAR_MONTH = "targetYearMonth"
+  val ADDINFO_TARGET_POINTS_CONVERTED = "targetPointsConverted"
+  val ERROR_CODE_CONVERSION_LIMIT_EXCEEDED = "CONVERSION_LIMIT_EXCEEDED"
+  val ERROR_CODE_INSUFFICIENT_BALANCE = "INSUFFICIENT_BALANCE"
+  val TRANSACTION_ID_PREFIX = "KARMA_COIN"
 
   // Metric names
   val totalEventsCount = "total-events-count"
