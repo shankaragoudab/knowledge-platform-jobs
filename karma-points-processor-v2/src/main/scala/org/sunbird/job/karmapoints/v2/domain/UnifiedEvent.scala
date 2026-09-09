@@ -25,10 +25,19 @@ class UnifiedEvent(eventMap: java.util.Map[String, Any], partition: Int, offset:
 
   def ets: Long = readOrDefault[Long]("ets", 0L)
 
-  def edata: Map[String, Any] = {
-    val raw = readOrDefault[java.util.Map[String, Any]]("edata", null)
-    if (raw == null) Map.empty[String, Any] else raw.asScala.toMap
+  /**
+   * V2 wrapper support: `data`/`edata` normally arrive as `java.util.Map` via Jackson, but nested
+   * `Any`-typed fields are deserialized by jackson-module-scala's untyped-object handling as
+   * `scala.collection.Map` instead - this accepts either shape rather than assuming one.
+   */
+  private def asMap(raw: Any): Map[String, Any] = raw match {
+    case null => Map.empty[String, Any]
+    case m: java.util.Map[String @unchecked, Any @unchecked] => m.asScala.toMap
+    case m: scala.collection.Map[String @unchecked, Any @unchecked] => m.toMap
+    case _ => Map.empty[String, Any]
   }
+
+  def edata: Map[String, Any] = asMap(readOrDefault[Any]("edata", null))
 
   def edataString(key: String, default: String = ""): String = edata.get(key) match {
     case Some(v) if v != null => v.toString
@@ -53,6 +62,7 @@ class UnifiedEvent(eventMap: java.util.Map[String, Any], partition: Int, offset:
    */
   def edataStringArrayFirst(key: String, default: String = ""): String = edata.get(key) match {
     case Some(list: java.util.List[_]) if !list.isEmpty => Option(list.get(0)).map(_.toString).getOrElse(default)
+    case Some(list: scala.collection.Seq[_]) if list.nonEmpty => Option(list.head).map(_.toString).getOrElse(default)
     case _ => default
   }
 
@@ -61,10 +71,7 @@ class UnifiedEvent(eventMap: java.util.Map[String, Any], partition: Int, offset:
    * instead of the `edata` shape above. `data` exposes that inner V1 payload untouched - no key
    * renaming/casing/flattening - so a handler can read it using the original V1 field names.
    */
-  def data: Map[String, Any] = {
-    val raw = readOrDefault[java.util.Map[String, Any]]("data", null)
-    if (raw == null) Map.empty[String, Any] else raw.asScala.toMap
-  }
+  def data: Map[String, Any] = asMap(readOrDefault[Any]("data", null))
 
   def dataString(key: String, default: String = ""): String = data.get(key) match {
     case Some(v) if v != null => v.toString
@@ -81,10 +88,7 @@ class UnifiedEvent(eventMap: java.util.Map[String, Any], partition: Int, offset:
    * RATING's - under `data.edata.*` - so this reads the nested object without any renaming or
    * flattening, same original V1 field names as `edata`/`edataString` above.
    */
-  def dataEdata: Map[String, Any] = data.get("edata") match {
-    case Some(raw: java.util.Map[String @unchecked, Any @unchecked]) => raw.asScala.toMap
-    case _ => Map.empty[String, Any]
-  }
+  def dataEdata: Map[String, Any] = asMap(data.get("edata").orNull)
 
   def dataEdataString(key: String, default: String = ""): String = dataEdata.get(key) match {
     case Some(v) if v != null => v.toString
