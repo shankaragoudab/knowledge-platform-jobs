@@ -386,7 +386,10 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           logger.info("Competency mapping event fired successfully: {}", competencyEvent)
           val badgeAwardEvent = buildBadgeAwardEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
           context.output(config.userBadgeAwardOutputTag, badgeAwardEvent)
-          //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
+          val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate)
+          logger.info("Firing course completion event for user: {} course: {} batch: {}", certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
+          context.output(config.courseCompletionOutputTag, courseCompletionEvent)
+          logger.info("Course completion event fired successfully: {}", courseCompletionEvent)
         } else {
           metrics.incCounter(config.failedEventCount)
           throw new Exception(s"Update certificates to enrolments failed: ${event}")
@@ -566,5 +569,34 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
     )
     ScalaJsonUtil.serialize(Map[String, AnyRef]("edata" -> edata))
   } 
+
+  /**
+   * Builds a serialized JSON string for the COURSE_COMPLETION Kafka event, matching the
+   * flat BE_JOB_REQUEST envelope (eventType/version added as sibling top-level keys).
+   */
+  private def buildCourseCompletionEvent(userId: String, contentId: String, batchId: String, completedLanguage: String, reIssueDate: Long): String = {
+    val edata = Map[String, AnyRef](
+      config.userIds -> List(userId),
+      config.courseId -> contentId,
+      config.action -> config.issueCertificateAction,
+      config.iteration -> Int.box(1),
+      config.trigger -> config.autoIssueTrigger,
+      config.batchId -> batchId,
+      config.reIssue -> Boolean.box(reIssueDate > 0),
+      config.completedLanguage -> completedLanguage
+    )
+    val event = Map[String, AnyRef](
+      config.eid -> "BE_JOB_REQUEST",
+      config.ets -> Long.box(System.currentTimeMillis()),
+      config.mid -> ("LP." + System.currentTimeMillis() + "." + java.util.UUID.randomUUID().toString),
+      config.actor -> Map[String, AnyRef]("id" -> "Course Certificate Generator", "type" -> "System"),
+      config.context -> Map[String, AnyRef]("pdata" -> Map[String, AnyRef]("ver" -> "1.0", "id" -> "org.sunbird.platform")),
+      config.`object` -> Map[String, AnyRef]("id" -> (batchId + "_" + contentId), "type" -> "CourseCertificateGeneration"),
+      config.eventType -> config.courseCompletionEventType,
+      config.EDATA -> edata,
+      config.version -> Int.box(2)
+    )
+    ScalaJsonUtil.serialize(event)
+  }
 
 }

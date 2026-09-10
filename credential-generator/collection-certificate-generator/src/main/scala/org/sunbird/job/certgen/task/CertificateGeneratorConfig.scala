@@ -24,6 +24,7 @@ class CertificateGeneratorConfig(override val config: Config) extends BaseJobCon
   val kafkaAuditEventTopic: String = config.getString("kafka.output.audit.topic")
   val kafkaCompetencyMappingTopic: String = config.getString("kafka.output.competency.topic")
   val kafkaBadgeAwardTopic: String = config.getString("kafka.output.badge.topic")
+  val kafkaCourseCompletionTopic: String = config.getString("kafka.output.course.completion.topic")
 
   val enableSuppressException: Boolean = if(config.hasPath("enable.suppress.exception")) config.getBoolean("enable.suppress.exception") else false
   val enableRcCertificate: Boolean = if(config.hasPath("enable.rc.certificate")) config.getBoolean("enable.rc.certificate") else false
@@ -32,6 +33,7 @@ class CertificateGeneratorConfig(override val config: Config) extends BaseJobCon
   val certificateGeneratorAuditProducer = "collection-certificate-generator-audit-events-sink"
   val certificateGeneratorCompetencyMappingProducer = "after-certificate-generator-competency-mapping-sink"
   val certificateGeneratorBadgeAwardProducer = "after-certificate-generator-badge-award-sink"
+  val certificateGeneratorCourseCompletionProducer = "after-certificate-generator-course-completion-sink"
 
   override val kafkaConsumerParallelism: Int = config.getInt("task.consumer.parallelism")
   val notifierParallelism: Int = if(config.hasPath("task.notifier.parallelism")) config.getInt("task.notifier.parallelism") else 1
@@ -169,6 +171,7 @@ class CertificateGeneratorConfig(override val config: Config) extends BaseJobCon
   val userFeedOutputTag: OutputTag[UserFeedMetaData] = OutputTag[UserFeedMetaData]("user-feed")
   val competencyMappingOutputTag: OutputTag[String] = OutputTag[String]("competency-mapping")
   val userBadgeAwardOutputTag: OutputTag[String] = OutputTag[String]("badge-award-mapping")
+  val courseCompletionOutputTag: OutputTag[String] = OutputTag[String]("course-completion-event")
 
   //UserFeed constants
   val priority: String = "priority"
@@ -201,5 +204,19 @@ class CertificateGeneratorConfig(override val config: Config) extends BaseJobCon
   val contextType = "contextType"
   val competencyAcquired = "COMPETENCY_ACQUIRED"
   val iGOTCourses = "iGOTCourses"
+  val courseCompletionEventType = "COURSE_COMPLETION"
+  val eid = "eid"
+  val ets = "ets"
+  val mid = "mid"
+  val actor = "actor"
+  val context = "context"
+  val `object` = "object"
+  val userIds = "userIds"
+  val iteration = "iteration"
+  val trigger = "trigger"
+  val reIssue = "reIssue"
+  val completedLanguage = "completedLanguage"
+  val autoIssueTrigger = "auto-issue"
+  val issueCertificateAction = "issue-certificate"
 
 }

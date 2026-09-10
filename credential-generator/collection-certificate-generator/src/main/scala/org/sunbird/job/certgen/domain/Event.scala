@@ -78,4 +78,6 @@ class Event(eventMap: java.util.Map[String, Any], partition: Int, offset: Long) 
   }
 
   def courseCategory: String = readOrDefault[String]("edata.courseCategory", "")
+
+  def completedLanguage: String = readOrDefault[String]("edata.completedLanguage", "")
 }
