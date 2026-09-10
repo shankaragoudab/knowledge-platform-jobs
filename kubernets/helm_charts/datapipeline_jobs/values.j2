@@ -1581,7 +1581,73 @@ assessment-public-certificate-generator:
     parallelism.default: 1
     jobmanager.execution.failover-strategy: region
     taskmanager.memory.network.fraction: 0.1
+    
+karma-points-processor-v2:
+  karma-points-processor-v2: |+
+    include file("/data/flink/conf/base-config.conf")
+    kafka {
+      input.topic = {{ env_name }}.karma.points.unified.v2.event
+      failed.topic = {{ env_name }}.karma.points.unified.v2.failed
+      groupId = "dev-karma-points-processor-v2-group"
 
+    }
+    task {
+      restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
+      restart-strategy.delay = 240000 # in milli-seconds # on max restarts (3) within 4 min the job will fail.
+      consumer.parallelism = {{ karma_points_processor_v2_consumer_parallelism }}
+      parallelism = {{ karma_points_processor_v2_parallelism }}
+      notifier.parallelism = {{ karma_points_processor_v2_notifier_parallelism }}
+    }
+    cassandra {
+      sunbird.keyspace = "sunbird"
+      sunbird_courses.keyspace = "sunbird_courses"
+      content_hierarchy.keyspace="{{ env}}_hierarchy_store"
+      user_karma_points.table="{{ user_karma_points_table }}"
+      user_karma_points_credit_lookup.table="{{ user_karma_points_credit_lookup_table }}"
+      content_hierarchy.table="content_hierarchy"
+      user_enrolments.table="user_enrolments"
+      user.table = "user"
+      user_karma_points_summary.table= "user_karma_points_summary"
+      user_assessment_data.table = "user_assessment_data"
+      course_batch.table = "course_batch"
+    }
+    service {
+      cbplan.basePath = "{{ cb_ext_service_base_url }}"
+      cbplan.v2.basePath = "{{ cb_ext_course_service_base_url }}"
+      event.read = "{{ core_content_service_base_url }}event/v4/read/"
+    }
+    karmapoints {
+      acbpQuotaKarmaPoints = 5
+      courseCompletionQuotaKarmaPoints = 5
+      learningPathwayCompletionQuotaKarmaPoints = 25
+      assessmentQuotaKarmaPoints = 5
+      ratingQuotaKarmaPoints = 2
+      firstLoginQuotaKarmaPoints = 5
+      firstEnrolmentQuotaKarmaPoints = 5
+      nonAcbpCourseQuota = 4
+      eventQuotaKarmaPoints = 5
+      enableCapping = false
+    }
+    redis {
+      database {
+        relationCache.id = 6
+        contentCache.id = 7
+      }
+      host = {{ dp_redis_host }}
+      port = 6379
+    }
+    metrics {
+      enabled = true
+      reporter = "slf4j"
+    }
+
+  flink-conf: |+
+    jobmanager.memory.flink.size: {{ flink_job_names['karma-points-processor-v2'].jobmanager_memory }}
+    taskmanager.memory.flink.size: {{ flink_job_names['karma-points-processor-v2'].taskmanager_memory }}
+    taskmanager.numberOfTaskSlots: {{ flink_job_names['karma-points-processor-v2'].taskslots }}
+    parallelism.default: 1
+    jobmanager.execution.failover-strategy: region
+    taskmanager.memory.network.fraction: 0.1
 
 tolerations:
   enabled: {{ kp_flink_tolerations_enabled | default('false') }}

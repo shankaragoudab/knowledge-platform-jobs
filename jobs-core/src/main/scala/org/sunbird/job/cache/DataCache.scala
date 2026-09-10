@@ -170,6 +170,28 @@ class DataCache(val config: BaseJobConfig, val redisConnect: RedisConnect, val d
     redisConnection.set(key, value)
   }
 
+  /**
+   * Atomic set-if-absent with TTL (Redis `SET key value NX EX ttlSeconds`), for callers that need
+   * a distributed claim rather than an unconditional mirror-write. Returns true if this call set
+   * the key (it did not previously exist); false if the key already existed (NX prevented the
+   * write - Jedis returns null in that case).
+   */
+  def setIfAbsentWithTTL(key: String, value: String, ttlSeconds: Int): Boolean = {
+    try {
+      setIfAbsent(key, value, ttlSeconds)
+    } catch {
+      case ex: JedisException =>
+        logger.error("Exception when set-if-absent to redis cache", ex)
+        close()
+        this.redisConnection = redisConnect.getConnection(dbIndex)
+        setIfAbsent(key, value, ttlSeconds)
+    }
+  }
+
+  private def setIfAbsent(key: String, value: String, ttlSeconds: Int): Boolean = {
+    redisConnection.set(key, value, "NX", "EX", ttlSeconds.toLong) != null
+  }
+
   def sMembers(key: String): util.Set[String] = {
     redisConnection.smembers(key)
   }
