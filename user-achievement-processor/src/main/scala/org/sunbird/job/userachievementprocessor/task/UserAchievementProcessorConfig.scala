@@ -92,6 +92,9 @@ class UserBadgeAwardingConfig(override val config: Config) extends BaseJobConfig
   val criteria: String = "criteria"
   val issuedOn: String = "issuedon"
   val templateUrl: String = "templateurl"
+  val courseCategory: String = "courseCategory"
+  val coursecategory: String = "coursecategory"
+  val LEARNING_PATHWAY = "Learning Pathway"
 
   val badgeEnabledCourses: util.List[String] = if (config.hasPath("badge.enabled.courses")) config.getStringList("badge.enabled.courses") else util.Arrays.asList("")
   val badgeEnabledPrograms: util.List[String] = if (config.hasPath("badge.enabled.programs")) config.getStringList("badge.enabled.programs") else util.Arrays.asList("")

@@ -232,11 +232,18 @@ class UserAchievementPreProcessorFn(config: UserBadgeAwardingConfig, httpUtil: H
     val courseId = event.contentId
     val batchId = event.batchId
 
-    if (!config.badgeEnabledCourses.contains(courseId)) {
+    val courseMetadata: java.util.Map[String, AnyRef] = getCourseInfo(courseId)(metrics, config, contentCache, httpUtil)
+    val courseCategory = Option(courseMetadata.get(config.courseCategory)).map(_.toString).getOrElse("")
+
+    // Learning Pathway badges are driven by content metadata, so they bypass the badge.enabled.courses allowlist
+    val isLearningPathway = config.LEARNING_PATHWAY.equalsIgnoreCase(courseCategory)
+
+    if (isLearningPathway) {
+      logger.info("CourseId: " + courseId + " is a Learning Pathway, skipping badge config validation.")
+    } else if (!config.badgeEnabledCourses.contains(courseId)) {
       logger.info("CourseId: " + courseId + " is not enabled for badge awarding, skipping.")
       return
     }
-    val courseMetadata: java.util.Map[String, AnyRef] = getCourseInfo(courseId)(metrics, config, contentCache, httpUtil)
     // Process badge awarding for iGOTCourses
     processBadgeAwardingForIGOTCourses(userId, courseId, batchId, courseMetadata, metrics)
   }
@@ -267,11 +274,16 @@ class UserAchievementPreProcessorFn(config: UserBadgeAwardingConfig, httpUtil: H
         s"Fetching course details from Content Service for Id: ${courseId}"
       )
       val url =
-        config.contentReadURL + "/" + courseId + "?fields=identifier,name,parentCollections,primaryCategory,childNodes,badgeDetails_v1"
+        config.contentReadURL + "/" + courseId + "?fields=identifier,name,parentCollections,primaryCategory,courseCategory,childNodes,badgeDetails_v1"
       val response = getAPICall(url, "content")(config, httpUtil, metrics)
       val primaryCategory = StringContext
         .processEscapes(
           response.getOrElse("primaryCategory", "").asInstanceOf[String]
+        )
+        .filter(_ >= ' ')
+      val courseCategory = StringContext
+        .processEscapes(
+          response.getOrElse(config.courseCategory, "").asInstanceOf[String]
         )
         .filter(_ >= ' ')
       val parentCollections = response
@@ -290,6 +302,7 @@ class UserAchievementPreProcessorFn(config: UserBadgeAwardingConfig, httpUtil: H
       courseInfoMap.put("courseId", courseId)
       courseInfoMap.put("parentCollections", parentCollections)
       courseInfoMap.put("primaryCategory", primaryCategory)
+      courseInfoMap.put(config.courseCategory, courseCategory)
       courseInfoMap.put("childNodes", childNodes)
       courseInfoMap.put("badgeDetails_v1", badgeDetails_v1)
       courseInfoMap.put("name", courseName)
@@ -300,6 +313,13 @@ class UserAchievementPreProcessorFn(config: UserBadgeAwardingConfig, httpUtil: H
         .processEscapes(
           courseMetadata
             .getOrElse("primarycategory", "")
+            .asInstanceOf[String]
+        )
+        .filter(_ >= ' ')
+      val courseCategory = StringContext
+        .processEscapes(
+          courseMetadata
+            .getOrElse(config.coursecategory, "")
             .asInstanceOf[String]
         )
         .filter(_ >= ' ')
@@ -314,6 +334,7 @@ class UserAchievementPreProcessorFn(config: UserBadgeAwardingConfig, httpUtil: H
       courseInfoMap.put("courseId", courseId)
       courseInfoMap.put("parentCollections", parentCollections)
       courseInfoMap.put("primaryCategory", primaryCategory)
+      courseInfoMap.put(config.courseCategory, courseCategory)
       val childNodes = courseMetadata
         .getOrElse("childnodes", new java.util.ArrayList())
         .asInstanceOf[java.util.ArrayList[String]]
