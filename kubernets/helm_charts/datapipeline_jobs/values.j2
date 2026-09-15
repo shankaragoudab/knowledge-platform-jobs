@@ -1588,7 +1588,8 @@ karma-points-processor-v2:
     kafka {
       input.topic = {{ env_name }}.karma.points.unified.v2.event
       failed.topic = {{ env_name }}.karma.points.unified.v2.failed
-      groupId = "dev-karma-points-processor-v2-group"
+      groupId = {{ env_name }}.-karma-points-processor-v2-group
+      output.paid.course.enrolment.topic = {{ env_name }}.user.paid.course.enrolment
 
     }
     task {
