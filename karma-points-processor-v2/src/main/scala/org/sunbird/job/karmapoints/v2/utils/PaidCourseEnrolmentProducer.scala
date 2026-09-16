@@ -26,7 +26,7 @@ class PaidCourseEnrolmentProducer(config: KarmaPointsV2Config) extends Serializa
   }
 
   def send(userId: String, contextType: String, contextId: String, coinsRedeemed: Long,
-           transactionId: String, createdAt: Long): Unit = {
+           transactionId: String, createdAt: Long, courseName: String, providerName: String): Unit = {
     try {
       val data = new java.util.HashMap[String, Any]()
       data.put("reqId", UUID.randomUUID().toString)
@@ -40,6 +40,8 @@ class PaidCourseEnrolmentProducer(config: KarmaPointsV2Config) extends Serializa
       data.put("contextId", contextId)
       data.put("transactionId", transactionId)
       data.put("createdAt", createdAt)
+      data.put("courseName", courseName)
+      data.put("providerName", providerName)
 
       val eventPayload = new java.util.HashMap[String, Any]()
       eventPayload.put("eventType", config.EVENT_TYPE_EXT_COURSE_ENROLLMENT)
@@ -47,13 +49,17 @@ class PaidCourseEnrolmentProducer(config: KarmaPointsV2Config) extends Serializa
 
       val json = JSONUtil.serialize(eventPayload)
       val key = if (userId != null && userId.nonEmpty) userId else "unknown"
+      // Asynchronous, fire-and-forget publish - does not wait for the Kafka broker
+      // acknowledgement. Only a synchronous failure from producer.send(record) itself (e.g. a
+      // serialization error, or the send buffer being full) is caught and rethrown below;
+      // ack/timeout failures reported later via the returned Future are not observed here since
+      // the Future is intentionally not blocked on. Same topic, key and event structure as before.
       producer.send(new ProducerRecord[String, String](config.kafkaPaidCourseEnrolmentTopic, key, json))
     } catch {
       case ex: Exception =>
-        // Best-effort, same as the Redis wallet-cache refresh this follows: the redemption is
-        // already committed by this point, so a publish failure must not fail/retry the event.
         logger.error(s"Failed to publish paid-course-enrolment event to ${config.kafkaPaidCourseEnrolmentTopic} " +
-          s"for userId=$userId, transactionId=$transactionId", ex)
+          s"for userId=$userId, transactionId=$transactionId - propagating", ex)
+        throw ex
     }
   }
 

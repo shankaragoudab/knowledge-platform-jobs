@@ -101,6 +101,8 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val karmaCoinRequestClaimTTLSeconds: Int =
     if (config.hasPath("karmaCoin.redis.requestClaimTtlSeconds")) config.getInt("karmaCoin.redis.requestClaimTtlSeconds") else 14400
 
+  val KARMA_COIN_CONVERT_LOCK_PREFIX = "CB_EXT_karmaCoinConvertLock"
+
   val pointsConversionDedupEnabled: Boolean =
     if (config.hasPath("karmaCoin.redis.pointsConversionDedupEnabled"))
       config.getBoolean("karmaCoin.redis.pointsConversionDedupEnabled")
@@ -114,6 +116,20 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val coinsReawardDedupEnabled: Boolean =
     if (config.hasPath("karmaCoin.redis.coinsReawardDedupEnabled"))
       config.getBoolean("karmaCoin.redis.coinsReawardDedupEnabled")
+    else
+      true
+
+  /** When true (default), processElement's finally releases the exact first-level Redis dedup key
+   * a handler claimed if that event's processing threw any exception (DataQualityException,
+   * SystemException, or unclassified) - so a retry/replay of the same event isn't falsely
+   * short-circuited by a stale claim from an attempt that never completed. When false, the
+   * existing TTL (karmaCoinRequestClaimTTLSeconds) remains the only cleanup path, same as before
+   * this change existed. Independent of the per-flow claim-enabled flags above (those control
+   * whether a claim is attempted at all; this controls only whether a claimed key is released on
+   * exception). */
+  val releaseDedupOnException: Boolean =
+    if (config.hasPath("karmaCoin.redis.releaseDedupOnException"))
+      config.getBoolean("karmaCoin.redis.releaseDedupOnException")
     else
       true
 
@@ -193,6 +209,10 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val STATUS_FAILED = "FAILED"
   val STATUS_SUCCESS = "SUCCESS"
 
+  // COINS_REDEMPTION (C3): prefix for the `pendingEnrolment_<userId>_<contextId>` Redis status key -
+  // see RedisUtil.setPendingEnrolmentStatus.
+  val PENDING_ENROLMENT_PREFIX = "pendingEnrolment"
+
   val TOTAL_EARNED = "total_earned"
   val TOTAL_REDEEMED = "total_redeemed"
   val YEAR_MONTH = "year_month"
@@ -209,6 +229,7 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ADDINFO_ERROR_CODE = "errorCode"
   val ADDINFO_ERROR_MESSAGE = "errorMessage"
   val ADDINFO_TRANSACTION_ID = "transactionId"
+  val ADDINFO_USER_KARMA_COIN_KEY = "userKarmaCoinKey"
   val ADDINFO_POINTS_CONVERTED = "pointsConverted"
   val ADDINFO_POINTS_USED = "pointsUsed"
   val ADDINFO_RATIO = "ratio"
@@ -225,7 +246,14 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ERROR_CODE_CONVERSION_LIMIT_EXCEEDED = "CONVERSION_LIMIT_EXCEEDED"
   val ERROR_CODE_INSUFFICIENT_BALANCE = "INSUFFICIENT_BALANCE"
   val ERROR_CODE_INVALID_REAWARD = "INVALID_REAWARD_REQUEST"
-  val TRANSACTION_ID_PREFIX = "KARMA_COIN"
+  val TRANSACTION_ID_PREFIX = "TXN"
+  // TransactionIdGenerator's random suffix - length and alphabet, both config-driven so the
+  // "TXN-<N chars>" format can be widened or changed without a code change.
+  val TRANSACTION_ID_LENGTH: Int =
+    if (config.hasPath("karmaCoin.transactionId.length")) config.getInt("karmaCoin.transactionId.length") else 12
+  val TRANSACTION_ID_ALPHABET: String =
+    if (config.hasPath("karmaCoin.transactionId.alphabet")) config.getString("karmaCoin.transactionId.alphabet")
+    else "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
   // COINS_REAWARD - links the reaward (CREDIT) transaction back to the original redemption (DEBIT)
   // it reverses; carried in the new transaction's addinfo, never written onto the original row.

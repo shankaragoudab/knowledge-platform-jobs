@@ -109,6 +109,11 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       s"Processing karma event: userId=${extractUserId(event)}, eventType=${event.eventType}"
     )
 
+    // Set true in every catch arm below (DataQualityException, SystemException, or unclassified) -
+    // read only in `finally`, never here. Stays false on the success path, so a successful event's
+    // first-level Redis dedup key is never touched and simply ages out via its existing TTL.
+    var shouldReleaseDedup = false
+
     try {
       validateEvent(event)
       routeEvent(event)(metrics)
@@ -120,6 +125,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       )
     } catch {
       case ex: DataQualityException =>
+        shouldReleaseDedup = true
         logger.warn(s"Data-quality failure, routing to failed-topic: userId=${extractUserId(event)}, " +
           s"eventType=${event.eventType}, reason=${ex.message}")
         karmaMetrics.incCounter(config.failedEventCount)
@@ -129,6 +135,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
         // so a bad event never blocks the partition or gets redelivered forever.
 
       case ex: SystemException =>
+        shouldReleaseDedup = true
         logger.error(s"System failure, rethrowing to trigger job restart: userId=${extractUserId(event)}, " +
           s"eventType=${event.eventType}, reason=${ex.message}", ex.cause.getOrElse(ex))
         karmaMetrics.incSystemError(ex.getClass.getSimpleName)
@@ -137,11 +144,36 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       case ex: Exception =>
         // Anything not already classified is treated as infra/unknown and fails safe: rethrow so
         // Flink restarts rather than silently routing an unanticipated bug to the failed-topic.
+        shouldReleaseDedup = true
         logger.error(s"Unexpected exception processing event: userId=${extractUserId(event)}, eventType=${event.eventType}", ex)
         karmaMetrics.incSystemError(ex.getClass.getSimpleName)
         throw ex
     } finally {
+      if (config.releaseDedupOnException && shouldReleaseDedup) {
+        releaseFirstLevelDedupKey(event)
+      }
       karmaMetrics.recordLatency(startNanos)
+    }
+  }
+
+  /**
+   * Looks up the exact first-level Redis dedup key (if any) the handler that owns `event.eventType`
+   * claimed for this event, via [[EventHandler.lastClaimedDedupKey]], and releases it.
+   * `RedisUtil.releaseKarmaCoinRequestClaim` is already best-effort internally (catches and logs
+   * every Redis failure, never throws), so no extra try/catch is needed here - it cannot mask the
+   * original exception already propagating out of `processElement`. Deliberately does NOT touch
+   * `CB_EXT_karmaCoinConvertLock` - a separate lock, unrelated to first-level request dedup.
+   */
+  private def releaseFirstLevelDedupKey(event: UnifiedEvent): Unit = {
+    val dedupKeyOpt: Option[String] = event.eventType match {
+      case config.EVENT_TYPE_POINTS_CONVERSION => pointsConversionHandler.lastClaimedDedupKey
+      case config.EVENT_TYPE_COINS_REDEMPTION => coinsRedemptionHandler.lastClaimedDedupKey
+      case config.EVENT_TYPE_COINS_REAWARD => coinsReawardHandler.lastClaimedDedupKey
+      case _ => None
+    }
+    dedupKeyOpt.foreach { key =>
+      redisUtil.releaseKarmaCoinRequestClaim(key)
+      logger.info(s"Released first-level Redis dedup key after exception: eventType=${event.eventType}, key=$key")
     }
   }
 
