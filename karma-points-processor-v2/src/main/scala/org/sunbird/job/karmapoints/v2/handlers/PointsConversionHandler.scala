@@ -7,11 +7,11 @@ import org.sunbird.job.karmapoints.v2.config.KarmaPointsV2Config
 import org.sunbird.job.karmapoints.v2.domain.UnifiedEvent
 import org.sunbird.job.karmapoints.v2.exceptions.{CassandraException, InvalidPayloadException, InvalidUserIdException, MissingPayloadException}
 import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
+import org.sunbird.job.karmapoints.v2.utils.TransactionIdGenerator
 import org.sunbird.job.util.JSONUtil
 
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.UUID
 
 /** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`. */
 private[v2] case class PointsConversionRequest(userId: String, contextType: String, contextId: String,
@@ -72,16 +72,25 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
   private[v2] var lastHandledEvent: Option[UnifiedEvent] = None
 
   override protected def doHandle(event: UnifiedEvent)(implicit metrics: Metrics): Unit = {
+    // Reset before this event's own claim attempt, so a prior event's key can never leak into
+    // this event's exception-cleanup decision (see EventHandler.lastClaimedDedupKey's doc).
+    lastClaimedDedupKey = None
     val request = validateEvent(event)
 
     // `config.pointsConversionDedupEnabled &&` short-circuits: when false,
     // claimKarmaCoinRequest is never called at all, and Cassandra's claimOrResume below always runs.
-    if (config.pointsConversionDedupEnabled && !redisUtil.claimKarmaCoinDedup(userKarmaCoinKey(request), event.getJson())) {
-      // First-level dedup hit: Redis has seen this exact request key within the TTL window.
-      // Skip immediately, per the confirmed design - do not consult Cassandra for this case.
-      logger.info(s"Duplicate POINTS_CONVERSION per Redis first-level dedup, userKarmaCoinKey=${userKarmaCoinKey(request)}, skipping")
-      metrics.incCounter(config.skippedEventCount)
-      return
+    if (config.pointsConversionDedupEnabled) {
+      val dedupKey = userKarmaCoinKey(request)
+      if (!redisUtil.claimKarmaCoinDedup(dedupKey, event.getJson())) {
+        // First-level dedup hit: Redis has seen this exact request key within the TTL window.
+        // Skip immediately, per the confirmed design - do not consult Cassandra for this case.
+        logger.info(s"Duplicate POINTS_CONVERSION per Redis first-level dedup, userKarmaCoinKey=$dedupKey, skipping")
+        metrics.incCounter(config.skippedEventCount)
+        return
+      }
+      // We claimed it - record the exact key so processElement's finally can release it on
+      // exception without reconstructing it.
+      lastClaimedDedupKey = Some(dedupKey)
     }
 
     claimOrResume(request) match {
@@ -190,13 +199,13 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
     val freshCreditDate = System.currentTimeMillis()
     val freshAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
 
-    val claimed = cassandraUtil.claimKarmaCoinLookup(key, config.EVENT_TYPE_POINTS_CONVERSION, freshCreditDate, freshAddInfo)
+    val claimed = cassandraUtil.claimKarmaCoinLookup(key, request.operation, freshCreditDate, freshAddInfo)
     if (claimed) {
       return FreshAttempt(freshCreditDate)
     }
 
     // Contention: a row already exists. Read it once to find out why.
-    val existing = cassandraUtil.fetchKarmaCoinLookup(key, config.EVENT_TYPE_POINTS_CONVERSION)
+    val existing = cassandraUtil.fetchKarmaCoinLookup(key, request.operation)
     if (existing == null || existing.isEmpty) {
       // Vanishingly unlikely (claim just failed because the row existed, yet it's now gone) -
       // treat conservatively as a system hiccup rather than guessing; replay will retry cleanly.
@@ -222,7 +231,7 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
         // Allow a new attempt: CAS-transition FAILED -> PROCESSING using the exact addinfo value
         // just read as the expected precondition.
         val newAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
-        val transitioned = cassandraUtil.transitionKarmaCoinLookup(key, config.EVENT_TYPE_POINTS_CONVERSION,
+        val transitioned = cassandraUtil.transitionKarmaCoinLookup(key, request.operation,
           existingAddInfo, newAddInfo, freshCreditDate)
         if (!transitioned) {
           // Someone else changed the row between our read and this CAS attempt - vanishingly rare
@@ -278,7 +287,7 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
   private[v2] def updateLookupStatus(request: PointsConversionRequest, creditDate: Long, status: String,
                                      extraFields: (String, Any)*)(implicit metrics: Metrics): Unit = {
     val addInfo = cassandraUtil.buildAddInfo(null, (config.STATUS -> status) +: extraFields: _*)
-    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), config.EVENT_TYPE_POINTS_CONVERSION, creditDate, addInfo)
+    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), request.operation, creditDate, addInfo)
   }
 
   /**
@@ -369,7 +378,7 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
   private[v2] def freezeConversionPlan(request: PointsConversionRequest, calculation: PointsConversionCalculation,
                                        creditDate: Long)(implicit metrics: Metrics): ConversionPlan = {
     val plan = ConversionPlan(
-      transactionId = generateTransactionId(creditDate),
+      transactionId = TransactionIdGenerator.generate(config),
       createdAt = creditDate,
       targetTotalEarned = calculation.alreadyConvertedKP + request.pointsToConvert.toInt,
       targetTotalRedeemed = calculation.existingTotalRedeemed,
@@ -437,11 +446,4 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
         s"transactionId=${plan.transactionId}, points=${request.pointsToConvert}"
     )
   }
-
-  /** `PREFIX.timestamp.UUID`, the repo-wide id convention (e.g.
-   * `ActivityAggregatesFunctionV2`'s `s"LP.$ets.${UUID.randomUUID()}"`). Generated once (in
-   * [[freezeConversionPlan]]) and persisted - a replay reuses the same id from the recovered plan rather
-   * than generating a new one, which is what makes the transaction insert idempotent. */
-  private[v2] def generateTransactionId(createdAt: Long): String =
-    s"${config.TRANSACTION_ID_PREFIX}.$createdAt.${UUID.randomUUID().toString}"
 }

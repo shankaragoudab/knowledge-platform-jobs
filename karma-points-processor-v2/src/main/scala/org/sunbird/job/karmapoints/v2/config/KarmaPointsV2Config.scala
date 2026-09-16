@@ -119,6 +119,20 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
     else
       true
 
+  /** When true (default), processElement's finally releases the exact first-level Redis dedup key
+   * a handler claimed if that event's processing threw any exception (DataQualityException,
+   * SystemException, or unclassified) - so a retry/replay of the same event isn't falsely
+   * short-circuited by a stale claim from an attempt that never completed. When false, the
+   * existing TTL (karmaCoinRequestClaimTTLSeconds) remains the only cleanup path, same as before
+   * this change existed. Independent of the per-flow claim-enabled flags above (those control
+   * whether a claim is attempted at all; this controls only whether a claimed key is released on
+   * exception). */
+  val releaseDedupOnException: Boolean =
+    if (config.hasPath("karmaCoin.redis.releaseDedupOnException"))
+      config.getBoolean("karmaCoin.redis.releaseDedupOnException")
+    else
+      true
+
   // Cassandra column / field constants (same DB schema as V1)
   val HIERARCHY = "hierarchy"
   val COURSE_ID = "courseId"
@@ -195,6 +209,10 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val STATUS_FAILED = "FAILED"
   val STATUS_SUCCESS = "SUCCESS"
 
+  // COINS_REDEMPTION (C3): prefix for the `pendingEnrolment_<userId>_<contextId>` Redis status key -
+  // see RedisUtil.setPendingEnrolmentStatus.
+  val PENDING_ENROLMENT_PREFIX = "pendingEnrolment"
+
   val TOTAL_EARNED = "total_earned"
   val TOTAL_REDEEMED = "total_redeemed"
   val YEAR_MONTH = "year_month"
@@ -229,10 +247,13 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ERROR_CODE_INSUFFICIENT_BALANCE = "INSUFFICIENT_BALANCE"
   val ERROR_CODE_INVALID_REAWARD = "INVALID_REAWARD_REQUEST"
   val TRANSACTION_ID_PREFIX = "TXN"
-  // Number of hex characters (from a UUID, dashes stripped) used as the uniqueness suffix in
-  // "TXN-<timestamp>-<suffix>" - config-driven so it can be widened/narrowed without a code change.
-  val TRANSACTION_ID_SUFFIX_LENGTH: Int =
-    if (config.hasPath("karmaCoin.transactionId.suffixLength")) config.getInt("karmaCoin.transactionId.suffixLength") else 16
+  // TransactionIdGenerator's random suffix - length and alphabet, both config-driven so the
+  // "TXN-<N chars>" format can be widened or changed without a code change.
+  val TRANSACTION_ID_LENGTH: Int =
+    if (config.hasPath("karmaCoin.transactionId.length")) config.getInt("karmaCoin.transactionId.length") else 12
+  val TRANSACTION_ID_ALPHABET: String =
+    if (config.hasPath("karmaCoin.transactionId.alphabet")) config.getString("karmaCoin.transactionId.alphabet")
+    else "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
   // COINS_REAWARD - links the reaward (CREDIT) transaction back to the original redemption (DEBIT)
   // it reverses; carried in the new transaction's addinfo, never written onto the original row.

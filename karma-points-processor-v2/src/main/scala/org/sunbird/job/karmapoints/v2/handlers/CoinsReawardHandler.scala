@@ -46,29 +46,10 @@ private[v2] case class ReawardProceed(creditDate: Long) extends ReawardClaimOutc
 private[v2] case class ReawardResumeWithPlan(plan: ReawardPlan) extends ReawardClaimOutcome
 
 /**
- * Handles COINS_REAWARD (CREDIT) events - returning previously-redeemed Karma Coins to a user's
- * wallet (e.g. an external course enrollment that was paid for with a COINS_REDEMPTION DEBIT later
- * failed). Payload: `data.userId`, `data.operation` ("CREDIT"), `data.actionType`
- * ("COINS_REAWARD"), `data.coinsToReaward`, `data.contextType`, `data.contextId` (same
- * contextType/contextId as the original redemption - a reaward always targets the same enrollment
- * context), `data.transactionId`/`data.createdAt` (the original DEBIT's primary key, used to fetch
- * and validate it), plus unvalidated `data.info`/`data.courseName`/`data.providerName` carried
- * through to the new transaction's addinfo.
- *
- * Flow, mirroring [[CoinsRedemptionHandler]] throughout: validate -> Redis first-level dedup (when
- * `coinsReawardDedupEnabled`, under a namespaced key - see [[redisDedupKey]]) -> Cassandra
- * `claimOrResume` (LWT claim on `user_karma_coin_lookup`, `operation_type=COINS_REAWARD`, so this
- * never collides with the COINS_REDEMPTION row of the same `userKarmaCoinKey`) -> `calculateReaward`
- * (fetches and validates the original DEBIT, then computes the decremented wallet target) ->
- * `writePlan` (freezes the target wallet values + a NEW transaction id into the still-PROCESSING
- * lookup row) -> `applyPlan` (wallet -> CREDIT transaction -> lookup SUCCESS -> Redis wallet-cache
- * refresh). The original DEBIT row is never modified or deleted.
- *
- * Idempotency: since a reaward's business key (`userId|contextType|contextId`) is the SAME as the
- * redemption it reverses, a second reaward event for that same context hits `user_karma_coin_lookup`
- * status SUCCESS and is skipped exactly like any other duplicate - no separate "already reawarded"
- * marker is needed (and none is written onto the original transaction, per the "never modify the
- * original DEBIT" requirement).
+ * Handles COINS_REAWARD (CREDIT) events to return previously redeemed
+ * Karma Coins to the user's wallet when a redemption needs to be reversed.
+ * Validates the original redemption and calculates the coins to be reawarded.
+ * Updates the wallet and records the reaward transaction.
  */
 class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraUtil, redisUtil: RedisUtil) extends EventHandler {
 
@@ -78,6 +59,9 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
   private[v2] var lastHandledEvent: Option[UnifiedEvent] = None
 
   override protected def doHandle(event: UnifiedEvent)(implicit metrics: Metrics): Unit = {
+    // Reset before this event's own claim attempt, so a prior event's key can never leak into
+    // this event's exception-cleanup decision (see EventHandler.lastClaimedDedupKey's doc).
+    lastClaimedDedupKey = None
     val request = validateEvent(event)
     val requestKey = userKarmaCoinKey(request)
     val redisKey = redisDedupKey(request)
@@ -89,47 +73,42 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
       metrics.incCounter(config.skippedEventCount)
       return
     }
+    // We claimed it - record the exact (namespaced) key that was actually used, NOT
+    // userKarmaCoinKey(request). Release-on-exception is now owned centrally by
+    // KarmaPointsProcessorFnV2.processElement's finally (via this field) rather than here - the
+    // former handler-level try/catch that used to call releaseKarmaCoinRequestClaim on any
+    // exception before rethrowing has been removed as redundant with that central cleanup.
+    if (dedupEnabled) lastClaimedDedupKey = Some(redisKey)
 
-    try {
-      claimOrResumeReaward(request) match {
-        case ReawardAlreadySucceeded =>
-          // Already logged/metered inside claimOrResume.
+    claimOrResumeReaward(request) match {
+      case ReawardAlreadySucceeded =>
+        // Already logged/metered inside claimOrResume.
 
-        case ReawardProceed(creditDate) =>
-          val calculation = try {
-            calculateReaward(request)
-          } catch {
-            case ex: InvalidPayloadException =>
-              // Business-rule rejection - mark the lookup FAILED before letting the existing
-              // DataQualityException/failed-topic path handle it.
-              updateLookupStatus(request, creditDate, config.STATUS_FAILED,
-                config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_INVALID_REAWARD,
-                config.ADDINFO_ERROR_MESSAGE -> ex.message)
-              throw ex
-          }
-          val plan = createAndPersistReawardPlan(request, calculation, creditDate)
-          applyReawardPlan(request, event, plan)
-          lastHandledEvent = Some(event)
-          logger.info(s"COINS_REAWARD completed successfully: userId=${request.userId}, contextId=${request.contextId}, " +
-            s"coinsToReaward=${request.coinsToReaward}, originalTransactionId=${request.originalTransactionId}")
-
-        case ReawardResumeWithPlan(plan) =>
-          // Plan was already frozen by a prior crashed attempt - re-apply it as-is, never
-          // recompute; safe regardless of how far that prior attempt got.
-          applyReawardPlan(request, event, plan)
-          lastHandledEvent = Some(event)
-          logger.info(s"COINS_REAWARD resumed from persisted plan: userId=${request.userId}, " +
-            s"contextId=${request.contextId}, transactionId=${plan.transactionId}")
-      }
-    } catch {
-      case ex: Exception =>
-        // Release the Redis claim before rethrowing - same reasoning as CoinsRedemptionHandler:
-        // otherwise a Flink checkpoint replay would see the stale claim, skip without ever reaching
-        // Cassandra, and permanently strand the lookup row in PROCESSING.
-        if (dedupEnabled) {
-          redisUtil.releaseKarmaCoinRequestClaim(redisKey)
+      case ReawardProceed(creditDate) =>
+        val calculation = try {
+          calculateReaward(request)
+        } catch {
+          case ex: InvalidPayloadException =>
+            // Business-rule rejection - mark the lookup FAILED before letting the existing
+            // DataQualityException/failed-topic path handle it.
+            updateLookupStatus(request, creditDate, config.STATUS_FAILED,
+              config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_INVALID_REAWARD,
+              config.ADDINFO_ERROR_MESSAGE -> ex.message)
+            throw ex
         }
-        throw ex
+        val plan = createAndPersistReawardPlan(request, calculation, creditDate)
+        applyReawardPlan(request, event, plan)
+        lastHandledEvent = Some(event)
+        logger.info(s"COINS_REAWARD completed successfully: userId=${request.userId}, contextId=${request.contextId}, " +
+          s"coinsToReaward=${request.coinsToReaward}, originalTransactionId=${request.originalTransactionId}")
+
+      case ReawardResumeWithPlan(plan) =>
+        // Plan was already frozen by a prior crashed attempt - re-apply it as-is, never
+        // recompute; safe regardless of how far that prior attempt got.
+        applyReawardPlan(request, event, plan)
+        lastHandledEvent = Some(event)
+        logger.info(s"COINS_REAWARD resumed from persisted plan: userId=${request.userId}, " +
+          s"contextId=${request.contextId}, transactionId=${plan.transactionId}")
     }
   }
 
@@ -196,8 +175,9 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
   /** `userId|contextType|contextId` - the Cassandra lookup's `user_karma_coin_key`, SAME value as
    * the original COINS_REDEMPTION's (a reaward always targets the same enrollment context as the
    * redemption it reverses). Safe to reuse unprefixed here because `user_karma_coin_lookup`'s
-   * primary key is `(user_karma_coin_key, operation_type)` - `operation_type=COINS_REAWARD` alone
-   * already keeps this row completely separate from the COINS_REDEMPTION row of the same key. */
+   * primary key is `(user_karma_coin_key, operation_type)` - this row's `operation_type=CREDIT`
+   * (from `data.operation`) already keeps it separate from the COINS_REDEMPTION row's
+   * `operation_type=DEBIT` for the same key. */
   private[v2] def userKarmaCoinKey(request: CoinsReawardRequest): String =
     request.userId + config.PIPE + request.contextType + config.PIPE + request.contextId
 
@@ -221,13 +201,13 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
     val freshCreditDate = System.currentTimeMillis()
     val freshAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
 
-    val claimed = cassandraUtil.claimKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REAWARD, freshCreditDate, freshAddInfo)
+    val claimed = cassandraUtil.claimKarmaCoinLookup(requestKey, request.operation, freshCreditDate, freshAddInfo)
     if (claimed) {
       return ReawardProceed(freshCreditDate)
     }
 
     // Contention: a row already exists. Read it once to find out why.
-    val existing = cassandraUtil.fetchKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REAWARD)
+    val existing = cassandraUtil.fetchKarmaCoinLookup(requestKey, request.operation)
     if (existing == null || existing.isEmpty) {
       logger.error(
         s"COINS_REAWARD lookup row not found after claim failed, " +
@@ -249,7 +229,7 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
 
       case s if config.STATUS_FAILED.equals(s) =>
         val newAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
-        val transitioned = cassandraUtil.transitionKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REAWARD,
+        val transitioned = cassandraUtil.transitionKarmaCoinLookup(requestKey, request.operation,
           existingAddInfo, newAddInfo, freshCreditDate)
         if (!transitioned) {
           throw CassandraException(s"Could not CAS FAILED->PROCESSING for user_karma_coin_lookup key=$requestKey (contention)")
@@ -274,7 +254,7 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
   private[v2] def updateLookupStatus(request: CoinsReawardRequest, creditDate: Long, status: String,
                                      extraFields: (String, Any)*)(implicit metrics: Metrics): Unit = {
     val addInfo = cassandraUtil.buildAddInfo(null, (config.STATUS -> status) +: extraFields: _*)
-    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), config.EVENT_TYPE_COINS_REAWARD, creditDate, addInfo)
+    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), request.operation, creditDate, addInfo)
   }
 
   /** `(total_earned, total_redeemed)` for the user's wallet - same table/shape as

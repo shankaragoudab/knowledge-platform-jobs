@@ -17,6 +17,13 @@ trait EventHandler {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /**
+   * Stores the Redis deduplication key claimed for the current event.
+   * Used to release the claim when event processing fails.
+   * Reset for each event to prevent a previous key from being reused.
+   */
+  private[v2] var lastClaimedDedupKey: Option[String] = None
+
   protected def doHandle(event: UnifiedEvent)(implicit metrics: Metrics): Unit
 
   final def handle(event: UnifiedEvent)(implicit metrics: Metrics): Unit = {

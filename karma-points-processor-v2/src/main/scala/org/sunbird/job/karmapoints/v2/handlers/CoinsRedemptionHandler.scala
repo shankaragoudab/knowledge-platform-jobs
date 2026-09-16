@@ -13,9 +13,13 @@ import org.sunbird.job.util.JSONUtil
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-/** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`. */
+/** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`.
+ * `courseName`/`providerName` are optional passthrough fields (not validated) reused for both the
+ * transaction addinfo and the paid-course-enrolment Kafka payload, so both read the same frozen
+ * value instead of each re-parsing `event.data` independently. */
 private[v2] case class CoinsRedemptionRequest(userId: String, operation: String, actionType: String,
-                                              coinsToRedeem: Long, contextType: String, contextId: String)
+                                              coinsToRedeem: Long, contextType: String, contextId: String,
+                                              courseName: String, providerName: String)
 
 /** Business calculation result, reused to build the frozen plan below. No monthly-cap fields
  * (unlike [[PointsConversionHandler.PointsConversionCalculation]]) - DEBIT has no monthly cap and
@@ -39,24 +43,11 @@ private[v2] case class RedemptionProceed(creditDate: Long) extends RedemptionCla
 private[v2] case class RedemptionResumeWithPlan(plan: RedemptionPlan) extends RedemptionClaimOutcome
 
 /**
- * Handles COINS_REDEMPTION (DEBIT) events - a user spending Karma Coins (e.g. external course
- * enrollment). Payload: `data.userId`, `data.operation` ("DEBIT"), `data.actionType`
- * ("POINTS_REDEMPTION"), `data.coinsToRedeem`, `data.contextType`, `data.contextId`. Unlike
- * POINTS_CONVERSION's `contextType`, this one is an external-context discriminator (e.g.
- * "EXT_COURSE_ENROLLMENT"), not a fixed literal - only presence is validated. `courseName`/
- * `providerName` are carried through to the transaction addinfo but are not mandatory.
- *
- * Flow: validate -> Redis first-level dedup (when `coinsRedemptionDedupEnabled`) -> Cassandra
- * `claimOrResume` (LWT claim on `user_karma_coin_lookup`, `operation_type=COINS_REDEMPTION` so a
- * CREDIT and a DEBIT for the same `contextId` never collide) -> `calculateRedemption` (validates
- * `coinsToRedeem <= total_earned - total_redeemed`; no partial redemption) -> `writePlan`
- * (freezes the target wallet values + a transaction id into the still-PROCESSING lookup row) ->
- * `applyPlan` (wallet -> DEBIT transaction -> lookup SUCCESS -> Redis wallet-cache refresh).
- *
- * A PROCESSING row with an already-persisted plan is resumed via `RedemptionResumeWithPlan`
- * (re-applies the same plan, never recalculates); one without a plan (a prior attempt crashed
- * before writing it) is `RedemptionProceed`, i.e. redo `calculateRedemption` from live state.
- * Mirrors [[PointsConversionHandler]]'s claimOrResume/writePlan/applyPlan design throughout.
+ * Handles COINS_REDEMPTION (DEBIT) events where a user spends
+ * Karma Coins for an external course enrollment.
+ * Validates the redemption request and calculates the coins to be redeemed.
+ * Updates the user's wallet and records the redemption transaction.
+ * Publishes the course enrollment event after successful redemption.
  */
 class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraUtil, redisUtil: RedisUtil,
                              paidCourseEnrolmentProducer: PaidCourseEnrolmentProducer) extends EventHandler {
@@ -67,6 +58,9 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
   private[v2] var lastHandledEvent: Option[UnifiedEvent] = None
 
   override protected def doHandle(event: UnifiedEvent)(implicit metrics: Metrics): Unit = {
+    // Reset before this event's own claim attempt, so a prior event's key can never leak into
+    // this event's exception-cleanup decision (see EventHandler.lastClaimedDedupKey's doc).
+    lastClaimedDedupKey = None
     val request = validateEvent(event)
     val requestKey = userKarmaCoinKey(request)
     val dedupEnabled = config.coinsRedemptionDedupEnabled
@@ -77,11 +71,17 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
       metrics.incCounter(config.skippedEventCount)
       return
     }
-
+    // We claimed it - record the exact key. Release-on-exception is now owned centrally by
+    // KarmaPointsProcessorFnV2.processElement's finally (via this field) rather than here - the
+    // former handler-level try/catch that used to call releaseKarmaCoinRequestClaim on any
+    // exception before rethrowing has been removed as redundant with that central cleanup.
+    if (dedupEnabled) lastClaimedDedupKey = Some(requestKey)
     try {
       claimOrResumeRedemption(request) match {
         case RedemptionAlreadySucceeded =>
-          // Already logged/metered inside claimOrResume.
+          // Already logged/metered inside claimOrResume. No Redis pendingEnrolment write here -
+          // it was already set to SUCCESS by whichever attempt actually completed the redemption;
+          // an idempotent duplicate/replay must never move it back to FAILED.
 
         case RedemptionProceed(creditDate) =>
           val calculation = try {
@@ -89,14 +89,16 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
           } catch {
             case ex: InvalidPayloadException =>
               // Business-rule rejection - mark the lookup FAILED before letting the existing
-              // DataQualityException/failed-topic path handle it.
+              // DataQualityException/failed-topic path handle it. (The outer catch below still
+              // attempts the Redis pendingEnrolment FAILED update once this rethrows - that's a
+              // different system than this Cassandra update, not a duplicate of it.)
               updateLookupStatus(request, creditDate, config.STATUS_FAILED,
                 config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_INSUFFICIENT_BALANCE,
                 config.ADDINFO_ERROR_MESSAGE -> ex.message)
               throw ex
           }
           val plan = createAndPersistRedemptionPlan(request, calculation, creditDate)
-          applyRedemptionPlan(request, event, plan)
+          applyRedemptionPlan(request, plan)
           lastHandledEvent = Some(event)
           logger.info(s"COINS_REDEMPTION completed successfully: userId=${request.userId}, contextId=${request.contextId}, " +
             s"coinsToRedeem=${request.coinsToRedeem}")
@@ -104,20 +106,17 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         case RedemptionResumeWithPlan(plan) =>
           // Plan was already frozen by a prior crashed attempt - re-apply it as-is, never
           // recompute; safe regardless of how far that prior attempt got.
-          applyRedemptionPlan(request, event, plan)
+          applyRedemptionPlan(request, plan)
           lastHandledEvent = Some(event)
           logger.info(s"COINS_REDEMPTION resumed from persisted plan: userId=${request.userId}, " +
             s"contextId=${request.contextId}, transactionId=${plan.transactionId}")
       }
     } catch {
       case ex: Exception =>
-        // Release the Redis claim before rethrowing: otherwise a Flink checkpoint replay of this
-        // same event would see the stale claim, skip without ever reaching Cassandra, and
-        // permanently strand the lookup row (and any persisted Frozen Plan) in PROCESSING.
-        // Only relevant when dedup is enabled - if disabled, no claim was ever acquired.
-        if (dedupEnabled) {
-          redisUtil.releaseKarmaCoinRequestClaim(requestKey)
-        }
+        // Best-effort FAILED status write; RedisUtil.setPendingEnrolmentStatus already never
+        // throws (same fail-safe pattern as every other RedisUtil method), so this can never mask
+        // or replace the original exception being rethrown below.
+        redisUtil.setPendingEnrolmentStatus(request.userId, request.contextId, config.STATUS_FAILED)
         throw ex
     }
   }
@@ -164,7 +163,9 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         s"data.contextId is required for COINS_REDEMPTION event, userId=$userId"
       )
     }
-    CoinsRedemptionRequest(userId, operation, actionType, coinsToRedeem, contextType, contextId)
+    val courseName = event.dataString("courseName")
+    val providerName = event.dataString("providerName")
+    CoinsRedemptionRequest(userId, operation, actionType, coinsToRedeem, contextType, contextId, courseName, providerName)
   }
 
   /** `userId|contextType|contextId` - the Redis dedup key and the Cassandra lookup's
@@ -184,13 +185,13 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
     val freshCreditDate = System.currentTimeMillis()
     val freshAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
 
-    val claimed = cassandraUtil.claimKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REDEMPTION, freshCreditDate, freshAddInfo)
+    val claimed = cassandraUtil.claimKarmaCoinLookup(requestKey, request.operation, freshCreditDate, freshAddInfo)
     if (claimed) {
       return RedemptionProceed(freshCreditDate)
     }
 
     // Contention: a row already exists. Read it once to find out why.
-    val existing = cassandraUtil.fetchKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REDEMPTION)
+    val existing = cassandraUtil.fetchKarmaCoinLookup(requestKey, request.operation)
     if (existing == null || existing.isEmpty) {
       logger.error(
         s"COINS_REDEMPTION lookup row not found after claim failed, " +
@@ -212,7 +213,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
 
       case s if config.STATUS_FAILED.equals(s) =>
         val newAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_PROCESSING)
-        val transitioned = cassandraUtil.transitionKarmaCoinLookup(requestKey, config.EVENT_TYPE_COINS_REDEMPTION,
+        val transitioned = cassandraUtil.transitionKarmaCoinLookup(requestKey, request.operation,
           existingAddInfo, newAddInfo, freshCreditDate)
         if (!transitioned) {
           throw CassandraException(s"Could not CAS FAILED->PROCESSING for user_karma_coin_lookup key=$requestKey (contention)")
@@ -237,7 +238,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
   private[v2] def updateLookupStatus(request: CoinsRedemptionRequest, creditDate: Long, status: String,
                                      extraFields: (String, Any)*)(implicit metrics: Metrics): Unit = {
     val addInfo = cassandraUtil.buildAddInfo(null, (config.STATUS -> status) +: extraFields: _*)
-    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), config.EVENT_TYPE_COINS_REDEMPTION, creditDate, addInfo)
+    cassandraUtil.updateKarmaCoinLookup(userKarmaCoinKey(request), request.operation, creditDate, addInfo)
   }
 
   /** `(total_earned, total_redeemed)` for the user's wallet, same table POINTS_CONVERSION
@@ -306,12 +307,17 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
     plan
   }
 
-  /** Applies a frozen plan: wallet -> DEBIT transaction -> lookup SUCCESS -> Redis refresh ->
-   * EXT_COURSE_ENROLLMENT publish, in that order (Cassandra first, Redis and Kafka best-effort
-   * last). Every write is an absolute-value upsert or a deterministic-key insert driven by the
-   * plan, so this is safe to re-run in full. No `user_karma_coin_monthly_summary` write - DEBIT
-   * has no monthly cap. */
-  private[v2] def applyRedemptionPlan(request: CoinsRedemptionRequest, event: UnifiedEvent, plan: RedemptionPlan)
+  /** Applies a frozen plan, in this exact order (C3): wallet -> DEBIT transaction ->
+   * EXT_COURSE_ENROLLMENT publish (asynchronous, fire-and-forget - only a synchronous send-call
+   * failure throws and aborts this method; see [[PaidCourseEnrolmentProducer.send]]) -> lookup
+   * SUCCESS -> Redis `pendingEnrolment_<userId>_<contextId>` status SUCCESS -> best-effort wallet-cache refresh
+   * (own local try/catch - a failure here is logged only, never rethrown, so it can never reach
+   * `doHandle`'s outer catch and flip `pendingEnrolment` back to FAILED after Cassandra is
+   * already SUCCESS). The lookup is never marked SUCCESS unless the Kafka publish was already
+   * acknowledged. Every write here is an absolute-value upsert or a deterministic-key insert
+   * driven by the plan, so the whole method remains safe to re-run in full on retry/resume. No
+   * `user_karma_coin_monthly_summary` write - DEBIT has no monthly cap. */
+  private[v2] def applyRedemptionPlan(request: CoinsRedemptionRequest, plan: RedemptionPlan)
                                      (implicit metrics: Metrics): Unit = {
     logger.info(
       s"Applying COINS_REDEMPTION plan, " +
@@ -324,8 +330,8 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
 
     val balanceAfter = plan.targetTotalEarned - plan.targetTotalRedeemed
     val transactionAddInfo = cassandraUtil.buildAddInfo(null,
-      config.ADDINFO_COURSE_NAME -> event.dataString("courseName"),
-      config.ADDINFO_PROVIDER_NAME -> event.dataString("providerName"))
+      config.ADDINFO_COURSE_NAME -> request.courseName,
+      config.ADDINFO_PROVIDER_NAME -> request.providerName)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, plan.createdAt, plan.transactionId, config.OPERATION_DEBIT,
       request.coinsToRedeem, balanceAfter, config.ACTION_TYPE_POINTS_REDEMPTION,
       request.contextType, request.contextId, transactionAddInfo)
@@ -334,6 +340,8 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         s"userId=${request.userId}, transactionId=${plan.transactionId}, " +
         s"amount=${request.coinsToRedeem}, balanceAfter=$balanceAfter"
     )
+    paidCourseEnrolmentProducer.send(request.userId, request.contextType, request.contextId,
+      request.coinsToRedeem, plan.transactionId, plan.createdAt, request.courseName, request.providerName)
 
     // updateLookupStatus always starts from an empty addinfo map, so listing only
     updateLookupStatus(request, plan.createdAt, config.STATUS_SUCCESS,
@@ -343,18 +351,19 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         s"userId=${request.userId}, contextId=${request.contextId}, " +
         s"transactionId=${plan.transactionId}"
     )
+    redisUtil.setPendingEnrolmentStatus(request.userId, request.contextId, config.STATUS_SUCCESS)
 
-    // DEBIT never writes user_karma_coin_monthly_summary, so reading the current month's figure
-    // here (rather than hardcoding 0) avoids clobbering a legitimately-cached CREDIT value.
-    val (yearMonth, convertedThisMonth) = currentPointsConvertedThisMonth(request.userId)
-    redisUtil.setKarmaCoinWallet(request.userId, plan.targetTotalEarned, plan.targetTotalRedeemed, yearMonth, convertedThisMonth)
-
-    // Redemption is fully committed at this point - publish the paid-course-enrolment event so
-    // the external course can enroll the user. transactionId/createdAt come from the same frozen
-    // plan as the DEBIT transaction, so a resumed/replayed apply republishes under the same
-    // transactionId rather than a new one.
-    paidCourseEnrolmentProducer.send(request.userId, request.contextType, request.contextId,
-      request.coinsToRedeem, plan.transactionId, plan.createdAt)
+    try {
+      // DEBIT never writes user_karma_coin_monthly_summary, so reading the current month's figure
+      // here (rather than hardcoding 0) avoids clobbering a legitimately-cached CREDIT value.
+      val (yearMonth, convertedThisMonth) = currentPointsConvertedThisMonth(request.userId)
+      redisUtil.setKarmaCoinWallet(request.userId, plan.targetTotalEarned, plan.targetTotalRedeemed, yearMonth, convertedThisMonth)
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to refresh Redis wallet-cache after an already-successful COINS_REDEMPTION " +
+          s"(non-critical, redemption and pendingEnrolment are already SUCCESS), userId=${request.userId}, " +
+          s"contextId=${request.contextId}, transactionId=${plan.transactionId}", ex)
+    }
   }
 
   /** Current calendar month's `points_converted`, reused as-is from
