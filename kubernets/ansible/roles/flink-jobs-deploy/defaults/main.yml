@@ -215,6 +215,11 @@ user_achievement_updater_checkpointing_pause_interval: 90000
 ### to be removed
 job_classname: ""
 
+#####karma-points-processor-v2#####
+karma_points_processor_v2_notifier_parallelism: 1
+karma_points_processor_v2_consumer_parallelism: 1
+karma_points_processor_v2_parallelism: 1
+
 ### class name vars
 flink_job_names:
   activity-aggregate-updater:
@@ -382,6 +387,13 @@ flink_job_names:
     cpu_requests: 0.3
   user-achievement-processor:
     job_class_name: 'org.sunbird.job.userbadgeawarding.task.UserAchievementPreProcessorTask'
+    replica: 1
+    jobmanager_memory: 1024m
+    taskmanager_memory: 1024m
+    taskslots: 1
+    cpu_requests: 0.3
+  karma-points-processor-v2:
+    job_class_name: 'org.sunbird.job.karmapoints.v2.task.KarmaPointsProcessorTaskV2'
     replica: 1
     jobmanager_memory: 1024m
     taskmanager_memory: 1024m

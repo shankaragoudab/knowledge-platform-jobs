@@ -34,6 +34,7 @@
     <module>notification</module>
     <module>program-activity-aggregate-updater</module>
     <module>karma-points-persist-processor</module>
+    <module>karma-points-processor-v2</module>
     <module>user-activity-analysis-updater</module>
     <module>framework-search-indexer</module>
     <module>activity-aggregate-updater-v2</module>
