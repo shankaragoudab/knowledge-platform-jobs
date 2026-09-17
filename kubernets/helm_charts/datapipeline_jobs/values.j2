@@ -457,7 +457,7 @@ search-indexer:
     dialcode.index.name = "dialcode"
     dailcodemetrics.index.name = "dialcodemetrics"
     restrict.metadata.objectTypes = []
-    nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "transcripts", "accessibility", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "resourceTypeDetails", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1", "badgeDetails_v1", "trainingPlan_v2"]
+    nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "transcripts", "accessibility", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "resourceTypeDetails", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1", "badgeDetails_v1", "trainingPlan_v2", "batchSettings"]
     schema.definition_cache.expiry = {{ schema_definition_cache_expiry_in_sec }}
     restrict.objectTypes=["EventSet", "Questionnaire", "Misconception", "FrameworkType", "Term", "CategoryInstance","Framework"]
     ignored.fields={{ search_indexer_ignored_fields | to_json }}
