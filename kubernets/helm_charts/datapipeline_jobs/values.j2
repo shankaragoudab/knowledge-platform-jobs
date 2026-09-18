@@ -128,6 +128,7 @@ activity-aggregate-updater:
     task {
       window.shards = {{ activity_agg_window_shards }}
       checkpointing.interval = {{ activity_agg_checkpointing_interval }}
+      
       checkpointing.pause.between.seconds = {{ activity_agg_checkpointing_pause_interval }}
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
       restart-strategy.delay = {{ activity_agg_restart_strategy_delay }} # in milli-seconds # on max restarts (3) within 4 min the job will fail.
@@ -1636,27 +1637,41 @@ karma-points-processor-v2:
       requestClaimTtlSeconds = 14400
     }
     karmaCoin {
-      pointsConversion {
-      monthlyLimit = 300
-    }
-    transactionId {
+  # POINTS_CONVERSION monthly cap - Karma Points that can be converted to Karma Coins per calendar month.
+  pointsConversion {
+    monthlyLimit = 300
+  }
+ 
+  transactionId {
+    # Length of the random suffix in "TXN-<chars>" (TransactionIdGenerator).
     length = 12
+    # Alphabet the random suffix is drawn from.
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    }
-    redis {
+  }
+ 
+  redis {
+    # Karma Coin wallet cache TTL (RedisUtil.setKarmaCoinWallet).
+    cacheTtlSeconds = 3600
+    # First-level request-dedup claim TTL, in front of Cassandra (RedisUtil.claimKarmaCoinRequest).
+    requestClaimTtlSeconds = 60
+    # Independent per-flow switches for the Redis request-dedup/claim step only - Cassandra
+    # LWT/claimOrResume always runs regardless of these.
+    pointsConversionDedupEnabled = true
+    coinsRedemptionDedupEnabled  = true
+    coinsReawardDedupEnabled     = true
+    # When true, processElement's finally releases the exact first-level Redis dedup key a handler
+    # claimed if that event's processing threw any exception - so a retry/replay isn't falsely
+    # short-circuited by a stale claim. When false, the requestClaimTtlSeconds TTL above is the
+    # only cleanup path.
+    releaseDedupOnException      = true
+  }
+}
+
+redis {
       database {
         relationCache.id = 6
         contentCache.id = 7
-        cacheTtlSeconds = 3600
-        requestClaimTtlSeconds = 60
-        pointsConversionDedupEnabled = true
-        coinsRedemptionDedupEnabled = true
-        coinsReawardDedupEnabled = true
-        releaseDedupOnException = true
       }
-      host = {{ dp_redis_host }}
-      port = 6379
-    }
     metrics {
       enabled = true
       reporter = "slf4j"
