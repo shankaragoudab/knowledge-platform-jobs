@@ -10,7 +10,7 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 import org.sunbird.job.karmapoints.v2.utils.{PaidCourseEnrolmentProducer, TransactionIdGenerator}
 import org.sunbird.job.util.JSONUtil
 
-import java.time.LocalDate
+import java.time.{LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
 
 /** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`.
@@ -92,6 +92,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
               // DataQualityException/failed-topic path handle it. (The outer catch below still
               // attempts the Redis pendingEnrolment FAILED update once this rethrows - that's a
               // different system than this Cassandra update, not a duplicate of it.)
+              insertFailedRedemptionTransaction(request)
               updateLookupStatus(request, creditDate, config.STATUS_FAILED,
                 config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_INSUFFICIENT_BALANCE,
                 config.ADDINFO_ERROR_MESSAGE -> ex.message)
@@ -369,9 +370,20 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
   /** Current calendar month's `points_converted`, reused as-is from
    * [[CassandraUtil.fetchKarmaCoinMonthlySummary]] - see [[applyRedemptionPlan]] for why. No row yet -> 0. */
   private[v2] def currentPointsConvertedThisMonth(userId: String): (String, Int) = {
-    val yearMonth = LocalDate.now.format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
+    // Explicit Asia/Kolkata - do not rely on the JVM/TaskManager default timezone (H2 fix).
+    val yearMonth = LocalDate.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
     val rows = cassandraUtil.fetchKarmaCoinMonthlySummary(userId, yearMonth)
     val converted = if (rows != null && rows.size() > 0) rows.get(0).getInt(config.POINTS_CONVERTED) else 0
     (yearMonth, converted)
+  }
+
+  /** Records a business-failure FAILED transaction with a NEW transactionId/createdAt - never the
+   * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
+  private[v2] def insertFailedRedemptionTransaction(request: CoinsRedemptionRequest)(implicit metrics: Metrics): Unit = {
+    val (totalEarned, totalRedeemed) = readWallet(request.userId)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
+      config.OPERATION_DEBIT, 0L, totalEarned - totalRedeemed,
+      request.actionType, request.contextType, request.contextId, failedAddInfo)
   }
 }
