@@ -1634,10 +1634,24 @@ karma-points-processor-v2:
       enableCapping = false
       requestClaimTtlSeconds = 14400
     }
+    karmaCoin {
+      pointsConversion {
+      monthlyLimit = 300
+    }
+    transactionId {
+    length = 12
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    }
     redis {
       database {
         relationCache.id = 6
         contentCache.id = 7
+        cacheTtlSeconds = 3600
+        requestClaimTtlSeconds = 60
+        pointsConversionDedupEnabled = true
+        coinsRedemptionDedupEnabled = true
+        coinsReawardDedupEnabled = true
+        releaseDedupOnException = true
       }
       host = {{ dp_redis_host }}
       port = 6379
