@@ -457,7 +457,7 @@ search-indexer:
     dialcode.index.name = "dialcode"
     dailcodemetrics.index.name = "dialcodemetrics"
     restrict.metadata.objectTypes = []
-    nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "transcripts", "accessibility", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "resourceTypeDetails", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1","badgeDetails_v1"]
+    nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "transcripts", "accessibility", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "resourceTypeDetails", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1", "badgeDetails_v1", trainingPlan_v2, "batchSettings"]
     schema.definition_cache.expiry = {{ schema_definition_cache_expiry_in_sec }}
     restrict.objectTypes=["EventSet", "Questionnaire", "Misconception", "FrameworkType", "Term", "CategoryInstance","Framework"]
     ignored.fields={{ search_indexer_ignored_fields | to_json }}
@@ -685,6 +685,7 @@ collection-cert-pre-processor:
       output.failed.topic = {{ env_name }}.issue.certificate.failed
       event.output.topic = {{ env_name }}.event.generate.certificate.request
       groupId = {{ env_name }}-collection-cert-pre-processor-group
+      output.course.completion.topic = {{ env_name }}.karma.points.unified.v2.event
     }
     task {
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
@@ -1129,7 +1130,7 @@ content-publish:
         full = ["appIcon", "grayScaleAppIcon", "artifactUrl", "itemSetPreviewUrl", "media"]
       }
 
-      nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1","badgeDetails_v1"]
+      nested.fields = ["badgeAssertions", "targets", "badgeAssociations", "plugins", "me_totalTimeSpent", "me_totalPlaySessionCount", "me_totalTimeSpentInSec", "batches", "trackable", "credentials", "discussionForum", "provider", "osMetadata", "actions", "taxonomyPaths_v2", "competencies_v3", "test_competencies_v2", "competencies_v2", "secureSettings", "test_competencies_v4", "competencies_v5", "test_secureSettings", "competencies_v6", "referenceNodes", "sectorDetails_v1", "preEnrolmentResources", "languageMapV1", "milestones_v1", "badgeDetails_v1", "batchSettings"]
       restrict.objectTypes = ["EventSet", "Questionnaire", "Misconception", "FrameworkType", "EventSetImage", "EventImage", "resourceTypeDetails"]
     }
     cloud_storage {
@@ -1581,17 +1582,18 @@ assessment-public-certificate-generator:
     parallelism.default: 1
     jobmanager.execution.failover-strategy: region
     taskmanager.memory.network.fraction: 0.1
-    
+
 karma-points-processor-v2:
   karma-points-processor-v2: |+
     include file("/data/flink/conf/base-config.conf")
+
     kafka {
       input.topic = {{ env_name }}.karma.points.unified.v2.event
       failed.topic = {{ env_name }}.karma.points.unified.v2.failed
       groupId = {{ env_name }}.-karma-points-processor-v2-group
       output.paid.course.enrolment.topic = {{ env_name }}.user.paid.course.enrolment
-
     }
+
     task {
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
       restart-strategy.delay = 240000 # in milli-seconds # on max restarts (3) within 4 min the job will fail.
@@ -1599,16 +1601,17 @@ karma-points-processor-v2:
       parallelism = {{ karma_points_processor_v2_parallelism }}
       notifier.parallelism = {{ karma_points_processor_v2_notifier_parallelism }}
     }
+
     cassandra {
       sunbird.keyspace = "sunbird"
       sunbird_courses.keyspace = "sunbird_courses"
-      content_hierarchy.keyspace="{{ env}}_hierarchy_store"
-      user_karma_points.table="{{ user_karma_points_table }}"
-      user_karma_points_credit_lookup.table="{{ user_karma_points_credit_lookup_table }}"
-      content_hierarchy.table="content_hierarchy"
-      user_enrolments.table="user_enrolments"
+      content_hierarchy.keyspace = "{{ env }}_hierarchy_store"
+      user_karma_points.table = "{{ user_karma_points_table }}"
+      user_karma_points_credit_lookup.table = "{{ user_karma_points_credit_lookup_table }}"
+      content_hierarchy.table = "content_hierarchy"
+      user_enrolments.table = "user_enrolments"
       user.table = "user"
-      user_karma_points_summary.table= "user_karma_points_summary"
+      user_karma_points_summary.table = "user_karma_points_summary"
       user_assessment_data.table = "user_assessment_data"
       course_batch.table = "course_batch"
       user_karma_coin_lookup.table = "user_karma_coin_lookup"
@@ -1616,11 +1619,13 @@ karma-points-processor-v2:
       user_karma_coin_monthly_summary.table = "user_karma_coin_monthly_summary"
       user_karma_coin_transactions.table = "user_karma_coin_transactions"
     }
+
     service {
       cbplan.basePath = "{{ cb_ext_service_base_url }}"
       cbplan.v2.basePath = "{{ cb_ext_course_service_base_url }}"
       event.read = "{{ core_content_service_base_url }}event/v4/read/"
     }
+
     karmapoints {
       acbpQuotaKarmaPoints = 5
       courseCompletionQuotaKarmaPoints = 5
@@ -1634,31 +1639,51 @@ karma-points-processor-v2:
       enableCapping = false
       requestClaimTtlSeconds = 14400
     }
+
     karmaCoin {
+      # POINTS_CONVERSION monthly cap - Karma Points that can be converted to Karma Coins per calendar month.
       pointsConversion {
-      monthlyLimit = 300
+        monthlyLimit = 300
+      }
+
+      transactionId {
+        # Length of the random suffix in "TXN-<chars>" (TransactionIdGenerator).
+        length = 12
+        # Alphabet the random suffix is drawn from.
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+      }
+
+      redis {
+        # Karma Coin wallet cache TTL (RedisUtil.setKarmaCoinWallet).
+        cacheTtlSeconds = 3600
+
+        # First-level request-dedup claim TTL, in front of Cassandra (RedisUtil.claimKarmaCoinRequest).
+        requestClaimTtlSeconds = 60
+
+        # Independent per-flow switches for the Redis request-dedup/claim step only - Cassandra
+        # LWT/claimOrResume always runs regardless of these.
+        pointsConversionDedupEnabled = true
+        coinsRedemptionDedupEnabled = true
+        coinsReawardDedupEnabled = true
+
+        # When true, processElement's finally releases the exact first-level Redis dedup key a handler
+        # claimed if that event's processing threw any exception - so a retry/replay isn't falsely
+        # short-circuited by a stale claim. When false, the requestClaimTtlSeconds TTL above is the
+        # only cleanup path.
+        releaseDedupOnException = true
+      }
     }
-    transactionId {
-    length = 12
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    }
+
     redis {
       database {
         relationCache.id = 6
         contentCache.id = 7
-        cacheTtlSeconds = 3600
-        requestClaimTtlSeconds = 60
-        pointsConversionDedupEnabled = true
-        coinsRedemptionDedupEnabled = true
-        coinsReawardDedupEnabled = true
-        releaseDedupOnException = true
       }
-      host = {{ dp_redis_host }}
-      port = 6379
-    }
-    metrics {
-      enabled = true
-      reporter = "slf4j"
+
+      metrics {
+        enabled = true
+        reporter = "slf4j"
+      }
     }
 
   flink-conf: |+
