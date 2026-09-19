@@ -5,12 +5,12 @@ import org.slf4j.LoggerFactory
 import org.sunbird.job.Metrics
 import org.sunbird.job.karmapoints.v2.config.KarmaPointsV2Config
 import org.sunbird.job.karmapoints.v2.domain.UnifiedEvent
-import org.sunbird.job.karmapoints.v2.exceptions.{CassandraException, InvalidPayloadException, InvalidUserIdException, MissingPayloadException}
+import org.sunbird.job.karmapoints.v2.exceptions.{CassandraException, DataQualityException, InvalidPayloadException, InvalidUserIdException, MissingPayloadException}
 import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 import org.sunbird.job.karmapoints.v2.utils.TransactionIdGenerator
 import org.sunbird.job.util.JSONUtil
 
-import java.time.LocalDate
+import java.time.{LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
 
 /** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`. */
@@ -75,7 +75,14 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
     // Reset before this event's own claim attempt, so a prior event's key can never leak into
     // this event's exception-cleanup decision (see EventHandler.lastClaimedDedupKey's doc).
     lastClaimedDedupKey = None
-    val request = validateEvent(event)
+    val request = try {
+      validateEvent(event)
+    } catch {
+      case ex: DataQualityException =>
+        val userId = event.dataString("userId")
+        if (StringUtils.isNotEmpty(userId)) redisUtil.deleteKarmaCoinConvertLock(userId)
+        throw ex
+    }
 
     // `config.pointsConversionDedupEnabled &&` short-circuits: when false,
     // claimKarmaCoinRequest is never called at all, and Cassandra's claimOrResume below always runs.
@@ -109,9 +116,11 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
                 s"pointsToConvert=${request.pointsToConvert}, " +
                 s"creditDate=$creditDate, reason=${ex.message}"
             )
+            insertFailedConversionTransaction(request)
             updateLookupStatus(request, creditDate, config.STATUS_FAILED,
               config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_CONVERSION_LIMIT_EXCEEDED,
               config.ADDINFO_ERROR_MESSAGE -> ex.message)
+            redisUtil.deleteKarmaCoinConvertLock(request.userId)
             throw ex
         }
         val plan = freezeConversionPlan(request, calculation, creditDate)
@@ -306,7 +315,8 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
     val (alreadyConvertedKP, existingTotalRedeemed) = readWallet(request.userId)
     val unconvertedKP = calculateUnconvertedKP(lifetimeKP, alreadyConvertedKP)
 
-    val currentYearMonth = LocalDate.now.format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
+    // Explicit Asia/Kolkata - do not rely on the JVM/TaskManager default timezone (H2 fix).
+    val currentYearMonth = LocalDate.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
     val pointsConvertedThisMonth = readMonthlySummary(request.userId, currentYearMonth)
     val remainingMonthlyCap = calculateRemainingMonthlyCap(pointsConvertedThisMonth)
 
@@ -368,6 +378,16 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
   /** 1 Karma Point = 1 Karma Coin (current ratio). Kept as its own method so a future
    * configurable/non-1:1 ratio only changes this one place. */
   private[v2] def calculateCoins(pointsToConvert: Long): Long = pointsToConvert
+
+  /** Records a business-failure FAILED transaction with a NEW transactionId/createdAt - never the
+   * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
+  private[v2] def insertFailedConversionTransaction(request: PointsConversionRequest)(implicit metrics: Metrics): Unit = {
+    val (totalEarned, totalRedeemed) = readWallet(request.userId)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
+      config.OPERATION_CREDIT, 0L, totalEarned - totalRedeemed,
+      request.actionType, request.contextType, request.contextId, failedAddInfo)
+  }
 
   /**
    * Freezes the plan: computes the exact target wallet/monthly-summary values and a transaction id

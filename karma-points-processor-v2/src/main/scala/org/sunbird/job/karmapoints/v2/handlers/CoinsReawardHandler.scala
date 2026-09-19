@@ -10,7 +10,7 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 import org.sunbird.job.karmapoints.v2.utils.TransactionIdGenerator
 import org.sunbird.job.util.JSONUtil
 
-import java.time.LocalDate
+import java.time.{LocalDate, ZoneId}
 import java.time.format.DateTimeFormatter
 
 /** Fields extracted once validation passes, so `doHandle` never re-parses `event.data`.
@@ -91,6 +91,7 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
           case ex: InvalidPayloadException =>
             // Business-rule rejection - mark the lookup FAILED before letting the existing
             // DataQualityException/failed-topic path handle it.
+            insertFailedReawardTransaction(request)
             updateLookupStatus(request, creditDate, config.STATUS_FAILED,
               config.ADDINFO_ERROR_CODE -> config.ERROR_CODE_INVALID_REAWARD,
               config.ADDINFO_ERROR_MESSAGE -> ex.message)
@@ -418,9 +419,20 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
   /** Current calendar month's `points_converted`, reused as-is from
    * [[CassandraUtil.fetchKarmaCoinMonthlySummary]] - see [[applyReawardPlan]] for why. No row yet -> 0. */
   private[v2] def currentPointsConvertedThisMonth(userId: String): (String, Int) = {
-    val yearMonth = LocalDate.now.format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
+    // Explicit Asia/Kolkata - do not rely on the JVM/TaskManager default timezone (H2 fix).
+    val yearMonth = LocalDate.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern(config.YYYY_DASH_MM))
     val rows = cassandraUtil.fetchKarmaCoinMonthlySummary(userId, yearMonth)
     val converted = if (rows != null && rows.size() > 0) rows.get(0).getInt(config.POINTS_CONVERTED) else 0
     (yearMonth, converted)
+  }
+
+  /** Records a business-failure FAILED transaction with a NEW transactionId/createdAt - never the
+   * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
+  private[v2] def insertFailedReawardTransaction(request: CoinsReawardRequest)(implicit metrics: Metrics): Unit = {
+    val (totalEarned, totalRedeemed) = readWallet(request.userId)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
+      config.OPERATION_CREDIT, 0L, totalEarned - totalRedeemed,
+      request.actionType, request.contextType, request.contextId, failedAddInfo)
   }
 }
