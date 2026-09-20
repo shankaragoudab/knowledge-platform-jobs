@@ -446,7 +446,7 @@ search-indexer:
       input.topic = "{{ env_name }}.learning.graph.events"
       error.topic = "{{ env_name }}.learning.events.failed"
       groupId = "{{ env_name }}-search-indexer-group"
-      output.trainingplan.topic = "{ env_name }}.trainingplan.ca.events"
+      output.trainingplan.topic = "{{ env_name }}.trainingplan.ca.events"
     }
     task {
       consumer.parallelism = {{ search_indexer_consumer_parallelism }}
