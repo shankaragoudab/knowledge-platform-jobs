@@ -383,7 +383,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
     val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
-      config.OPERATION_DEBIT, 0L, totalEarned - totalRedeemed,
+      config.OPERATION_DEBIT, request.coinsToRedeem, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)
   }
 }

@@ -385,7 +385,7 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
     val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
-      config.OPERATION_CREDIT, 0L, totalEarned - totalRedeemed,
+      config.OPERATION_CREDIT, request.pointsToConvert, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)
   }
 
@@ -448,7 +448,7 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
       config.STATUS -> config.STATUS_SUCCESS,
       config.ADDINFO_USER_KARMA_COIN_KEY -> userKarmaCoinKey(request),
       config.ADDINFO_POINTS_CONVERTED -> request.pointsToConvert,
-      config.ADDINFO_RATIO -> config.RATIO_ONE_TO_ONE)
+      config.ADDINFO_RATIO -> config.pointsConversionRatio)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, plan.createdAt, plan.transactionId, config.OPERATION_CREDIT,
       calculateCoins(request.pointsToConvert), balanceAfter, config.EVENT_TYPE_POINTS_CONVERSION,
       request.contextType, request.contextId, transactionAddInfo)
