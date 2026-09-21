@@ -37,16 +37,31 @@ class CompositeSearchIndexerFunction(config: SearchIndexerConfig,
     metrics.incCounter(config.compositeSearchEventCount)
     try {
       val compositeObject = getCompositeIndexerObject(event)
-      processESMessage(compositeObject)(elasticUtil, defCache)
+      val trainingPlanEvents = processESMessage(compositeObject)(elasticUtil, defCache)
+      trainingPlanEvents.foreach(context.output(config.trainingPlanEventOutTag, _))
       metrics.incCounter(config.successCompositeSearchEventCount)
     } catch {
       case ex: Throwable =>
-        logger.error(s"Error while processing message for identifier : ${event.id}. Partition: ${event.partition} and Offset: ${event.offset}. Error : ", ex)
+        val eventDetails = describeEvent(event)
+        logger.error(s"Error while processing message. $eventDetails. Error : ", ex)
         metrics.incCounter(config.failedCompositeSearchEventCount)
         val failedEvent = getFailedEvent(event.jobName, event.getMap(), ex)
         context.output(config.failedEventOutTag, failedEvent)
-        throw new InvalidEventException(ex.getMessage, Map("partition" -> event.partition, "offset" -> event.offset), ex)
+        throw new InvalidEventException(s"$eventDetails. Error : ${ex.getMessage}", Map("partition" -> event.partition, "offset" -> event.offset), ex)
     }
+  }
+
+  /** One-line summary of the event for error logs: identifiers plus the names of the changed properties (not their values). */
+  private def describeEvent(event: Event): String = {
+    val changedProperties = event.getMap().get("transactionData") match {
+      case td: java.util.Map[_, _] => td.get("properties") match {
+        case props: java.util.Map[_, _] => props.keySet().toArray.mkString(",")
+        case _ => ""
+      }
+      case _ => ""
+    }
+    s"identifier: ${event.id}, mid: ${event.readOrDefault("mid", "")}, objectType: ${event.objectType}, " +
+      s"operationType: ${event.operationType}, changedProperties: [$changedProperties], partition: ${event.partition}, offset: ${event.offset}"
   }
 
   def getCompositeIndexerObject(event: Event): CompositeIndexer = {

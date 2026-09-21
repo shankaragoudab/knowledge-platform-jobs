@@ -445,6 +445,7 @@ search-indexer:
     kafka {
       input.topic = "{{ env_name }}.learning.graph.events"
       error.topic = "{{ env_name }}.learning.events.failed"
+      output.trainingplan.topic = "{{ env_name }}.trainingplan.ca.events"
       groupId = "{{ env_name }}-search-indexer-group"
     }
     task {
