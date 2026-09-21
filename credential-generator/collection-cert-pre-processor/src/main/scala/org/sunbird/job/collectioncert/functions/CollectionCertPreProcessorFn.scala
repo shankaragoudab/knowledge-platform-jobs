@@ -56,9 +56,6 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
         try {
             metrics.incCounter(config.totalEventsCount)
             if(event.isValid()(config)) {
-              val courseCompletionEvent = buildCourseCompletionEvent(event)
-              context.output(config.courseCompletionOutputTag, courseCompletionEvent)
-
               val certTemplates = fetchTemplates(event)(metrics).filter(template => template._2.getOrElse("url", "").asInstanceOf[String].contains(".svg"))
               if(!certTemplates.isEmpty) {
                 certTemplates.map(template => {
@@ -71,6 +68,8 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
               } else {
                 logger.info(s"No certTemplates available for batchId :${event.batchId}")
                 metrics.incCounter(config.skippedEventCount)
+                val courseCompletionEvent = buildCourseCompletionEvent(event)
+                context.output(config.courseCompletionOutputTag, courseCompletionEvent)
               }
             } else if (event.isValidEventType()(config)) {
                 // Call necessary methods from new helper class
