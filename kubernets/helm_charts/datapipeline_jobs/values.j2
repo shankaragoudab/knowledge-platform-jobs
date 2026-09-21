@@ -796,6 +796,7 @@ collection-certificate-generator:
       program.cert.output.topic= {{ env_name }}.issue.program.certificate.request
       output.competency.topic = "{{env_name}}.user.competency.mapping.event"
       output.badge.topic = {{ env_name }}.user.badge.award.request
+      output.course.completion.topic = "{{env_name}}.karma.points.unified.v2.event"
     }
     task {
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
