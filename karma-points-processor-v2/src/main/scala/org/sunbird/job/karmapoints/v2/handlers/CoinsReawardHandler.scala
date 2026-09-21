@@ -432,7 +432,7 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
     val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
-      config.OPERATION_CREDIT, 0L, totalEarned - totalRedeemed,
+      config.OPERATION_CREDIT, request.coinsToReaward, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)
   }
 }
