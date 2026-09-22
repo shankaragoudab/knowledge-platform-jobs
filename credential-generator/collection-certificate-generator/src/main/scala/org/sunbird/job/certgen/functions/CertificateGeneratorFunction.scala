@@ -94,12 +94,14 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
       } else {
         metrics.incCounter(config.skippedEventCount)
         logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][badge-path][suppressed] Certificate already issued - course completion event NOT fired: $logCtx, related=${event.related}")
+        logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][karma-event][not-triggered] reason=already-issued: $logCtx")
       }
       metrics.incCounter(config.successEventCount)
     } catch {
       case e: Exception =>
         metrics.incCounter(config.failedEventCount)
         logger.error(s"[COURSE_COMPLETION][collection-certificate-generator][failed] Error processing issue-certificate event: $logCtx, error=${e.getMessage}", e)
+        logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][karma-event][not-triggered] reason=exception: $logCtx, error=${e.getMessage}")
         throw new InvalidEventException(e.getMessage, Map("partition" -> event.partition, "offset" -> event.offset), e)
     }
   }
@@ -318,6 +320,7 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
     logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable] Fetched ${records.size} enrollment row(s) to update, $logCtx")
     if (records.isEmpty) {
       logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable][no-row] No enrollment row found for this userId/courseId/batchId - issued_certificates will NOT be updated and the course-completion/karma event will NOT be fired for this certificate generation, $logCtx")
+      logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][karma-event][not-triggered] reason=no-enrollment-row: $logCtx")
     }
     if (records.nonEmpty) {
       records.foreach((row: Row) => {
@@ -403,10 +406,12 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate)
           logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][badge-path] Firing course completion event: userId=${certMetaData.userId}, courseId=${certMetaData.courseId}, batchId=${certMetaData.batchId}, sourceEventPartition=${event.partition}, sourceEventOffset=${event.offset}, payload=$courseCompletionEvent")
           context.output(config.courseCompletionOutputTag, courseCompletionEvent)
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][karma-event][triggered] Emitted to topic=${config.kafkaCourseCompletionTopic}, userId=${certMetaData.userId}, courseId=${certMetaData.courseId}, batchId=${certMetaData.batchId}")
           //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
         } else {
           metrics.incCounter(config.failedEventCount)
           logger.error(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable][failed] Cassandra update of issued_certificates returned false - certificate row was NOT persisted, downstream audit/notification/competency/badge/course-completion events will NOT be fired for this certificate, $logCtx")
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][karma-event][not-triggered] reason=cassandra-update-failed: $logCtx")
           throw new Exception(s"Update certificates to enrolments failed: ${event}")
         }
 
