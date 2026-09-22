@@ -93,8 +93,7 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ACTION_TYPE_POINTS_REDEMPTION = "POINTS_REDEMPTION"
   val ACTION_TYPE_ENROLLMENT = "ENROLLMENT"
 
-  val pointsConversionMonthlyLimit: Int =
-    if (config.hasPath("karmaCoin.pointsConversion.monthlyLimit")) config.getInt("karmaCoin.pointsConversion.monthlyLimit") else 300
+  val pointsConversionMonthlyLimit: Int = config.getInt("karmaCoin.pointsConversion.monthlyLimit")
 
   val karmaCoinCacheTTLSeconds: Int =
     if (config.hasPath("karmaCoin.redis.cacheTtlSeconds")) config.getInt("karmaCoin.redis.cacheTtlSeconds") else 3600
@@ -233,7 +232,9 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ADDINFO_POINTS_CONVERTED = "pointsConverted"
   val ADDINFO_POINTS_USED = "pointsUsed"
   val ADDINFO_RATIO = "ratio"
-  val RATIO_ONE_TO_ONE = "1:1"
+  // Label only - written into transaction addinfo, never used in the points->coins calculation
+  // (see PointsConversionHandler.calculateCoins, which is independent of this value).
+  val pointsConversionRatio: String = config.getString("karmaCoin.pointsConversion.ratio")
 
   val ADDINFO_COURSE_NAME = "courseName"
   val ADDINFO_PROVIDER_NAME = "providerName"

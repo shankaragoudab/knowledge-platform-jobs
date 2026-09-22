@@ -28,6 +28,16 @@ object EventFixture {
       |{"ets":1502102183388,"nodeUniqueId":"do_112276071067320320114","requestId":null,"transactionData":{"removedTags":[],"addedRelations":[{"rel":"hasSequenceMember","id":"do_1123032073439723521148","label":"Test unit 11","dir":"IN","type":"Content"}],"removedRelations":[],"addedTags":[],"properties":{}},"operationType":"CREATE","nodeGraphId":105631,"label":"collaborator test","graphId":"domain","nodeType":"DATA_NODE","userId":"ANONYMOUS","createdOn":"2017-08-07T10:36:23.388+0000","objectType":"Content"}
       |""".stripMargin
 
+  val CA_CREATE: String =
+    """
+      |{"ets":1789704240725,"channel":"0138043201608089602","transactionData":{"properties":{"name":{"ov":null,"nv":"RK Test CA 1"},"courseCategory":{"ov":null,"nv":"Comprehensive Assessment"},"primaryCategory":{"ov":null,"nv":"Course"},"status":{"ov":null,"nv":"Draft"},"versionKey":{"ov":null,"nv":"1789704175618"}}},"mid":"18fa1582-bbc2-4030-bc58-77e06006f876","label":"RK Test CA 1","nodeType":"DATA_NODE","userId":"ANONYMOUS","createdOn":"2026-09-18T09:33:00.725+0530","objectType":"Collection","nodeUniqueId":"do_11466125660417228812","requestId":null,"operationType":"CREATE","nodeGraphId":119617,"graphId":"domain"}
+      |""".stripMargin
+
+  val CA_UPDATE_TRAINING_PLAN_ADD: String =
+    """
+      |{"ets":1789704240725,"channel":"0138043201608089602","transactionData":{"properties":{"trainingPlan_v2":{"ov":null,"nv":"{\"identifier\":\"e39f6cf0-b314-11f1-9299-21ed79c92209\",\"contentList\":[]}"},"lastUpdatedOn":{"ov":"2026-09-18T04:02:55.618+0000","nv":"2026-09-18T04:04:00.438+0000"},"versionKey":{"ov":"1789704175618","nv":"1789704240438"}}},"mid":"18fa1582-bbc2-4030-bc58-77e06006f877","label":"RK Test CA 1","nodeType":"DATA_NODE","userId":"ANONYMOUS","createdOn":"2026-09-18T09:34:00.725+0530","objectType":"Collection","nodeUniqueId":"do_11466125660417228812","requestId":null,"operationType":"UPDATE","nodeGraphId":119617,"graphId":"domain"}
+      |""".stripMargin
+
   val DATA_NODE_UPDATE_WITH_RELATION: String =
     """
       |{"ets":1502102183388,"nodeUniqueId":"do_112276071067320320114","requestId":null,"transactionData":{"removedTags":[],"addedRelations":[],"removedRelations":[{"rel":"hasSequenceMember","id":"do_1123032073439723521148","label":"Test unit 11","dir":"IN","type":"Content"}],"addedTags":[],"properties":{}},"operationType":"UPDATE","nodeGraphId":105631,"label":"collaborator test","graphId":"domain","nodeType":"DATA_NODE","userId":"ANONYMOUS","createdOn":"2017-08-07T10:36:23.388+0000","objectType":"Content"}

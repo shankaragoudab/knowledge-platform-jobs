@@ -39,6 +39,7 @@ class SearchIndexerStreamTask(config: SearchIndexerConfig, kafkaConnector: Flink
       .name("dialcode-metric-indexer").uid("dialcode-metric-indexer").setParallelism(config.dialCodeMetricIndexerParallelism)
 
     compositeSearchStream.getSideOutput(config.failedEventOutTag).addSink(kafkaConnector.kafkaStringSink(config.kafkaErrorTopic))
+    compositeSearchStream.getSideOutput(config.trainingPlanEventOutTag).addSink(kafkaConnector.kafkaStringSink(config.kafkaTrainingPlanTopic))
     dialcodeExternalStream.getSideOutput(config.failedEventOutTag).addSink(kafkaConnector.kafkaStringSink(config.kafkaErrorTopic))
     dialcodeMetricStream.getSideOutput(config.failedEventOutTag).addSink(kafkaConnector.kafkaStringSink(config.kafkaErrorTopic))
     env.execute(config.jobName)

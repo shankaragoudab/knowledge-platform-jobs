@@ -21,6 +21,7 @@ class SearchIndexerConfig(override val config: Config) extends BaseJobConfig(con
   // Kafka Topics Configuration
   val kafkaInputTopic: String = config.getString("kafka.input.topic")
   val kafkaErrorTopic: String = config.getString("kafka.error.topic")
+  val kafkaTrainingPlanTopic: String = config.getString("kafka.output.trainingplan.topic")
 
   // Parallelism
   val eventRouterParallelism: Int = config.getInt("task.router.parallelism")
@@ -50,6 +51,7 @@ class SearchIndexerConfig(override val config: Config) extends BaseJobConfig(con
   val dialCodeExternalOutTag: OutputTag[Event] = OutputTag[Event]("dialcode-external")
   val dialCodeMetricOutTag: OutputTag[Event] = OutputTag[Event]("dialcode-metric")
   val failedEventOutTag: OutputTag[String] = OutputTag[String]("failed-event")
+  val trainingPlanEventOutTag: OutputTag[String] = OutputTag[String]("training-plan-event")
 
   // ES Configs
   val esConnectionInfo = config.getString("es.basePath")
