@@ -61,7 +61,17 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
     // Reset before this event's own claim attempt, so a prior event's key can never leak into
     // this event's exception-cleanup decision (see EventHandler.lastClaimedDedupKey's doc).
     lastClaimedDedupKey = None
-    val request = validateEvent(event)
+    val request = try {
+      validateEvent(event)
+    } catch {
+      case ex: Exception =>
+        val rawUserId = event.dataString("userId")
+        val rawContextId = event.dataString("contextId")
+        if (StringUtils.isNotEmpty(rawUserId) && StringUtils.isNotEmpty(rawContextId)) {
+          redisUtil.setPendingEnrolmentStatus(rawUserId, rawContextId, config.STATUS_FAILED)
+        }
+        throw ex
+    }
     val requestKey = userKarmaCoinKey(request)
     val dedupEnabled = config.coinsRedemptionDedupEnabled
 
@@ -381,7 +391,10 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
    * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
   private[v2] def insertFailedRedemptionTransaction(request: CoinsRedemptionRequest)(implicit metrics: Metrics): Unit = {
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
-    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null,
+      config.STATUS -> config.STATUS_FAILED,
+      config.ADDINFO_COURSE_NAME -> request.courseName,
+      config.ADDINFO_PROVIDER_NAME -> request.providerName)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
       config.OPERATION_DEBIT, request.coinsToRedeem, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)

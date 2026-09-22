@@ -383,7 +383,10 @@ class PointsConversionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassan
    * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
   private[v2] def insertFailedConversionTransaction(request: PointsConversionRequest)(implicit metrics: Metrics): Unit = {
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
-    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null,
+      config.STATUS -> config.STATUS_FAILED,
+      config.ADDINFO_USER_KARMA_COIN_KEY -> userKarmaCoinKey(request),
+      config.ADDINFO_RATIO -> config.pointsConversionRatio)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
       config.OPERATION_CREDIT, request.pointsToConvert, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)
