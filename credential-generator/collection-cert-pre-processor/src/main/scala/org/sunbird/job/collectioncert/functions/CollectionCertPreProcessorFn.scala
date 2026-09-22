@@ -73,11 +73,8 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
                   })
                 })
               } else {
-                logger.info(s"No certTemplates available for batchId :${event.batchId}")
                 metrics.incCounter(config.skippedEventCount)
-                val courseCompletionEvent = buildCourseCompletionEvent(event)
-                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][no-badge-path] Firing course completion event: $logCtx, payload=$courseCompletionEvent")
-                context.output(config.courseCompletionOutputTag, courseCompletionEvent)
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][no-badge-path][skipped] No certTemplates configured for this batch - this is not a valid completion scenario, course-completion/karma event will NOT be raised. Course owner needs to add a certificate template (cert_templates) for this batch before completions can be processed: $logCtx")
               }
             } else if (event.isValidEventType()(config)) {
                 // Call necessary methods from new helper class
@@ -148,14 +145,16 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
     }
 
   /**
-   * Builds the flat BE_JOB_REQUEST envelope (eventType/version as sibling top-level keys,
-   * consumed by karma-points-processor-v2). Fired unconditionally for every valid
-   * issue-certificate event, independent of whether a certificate/badge template exists for
-   * the course - karma points are earned for completion, not for badge issuance. This is the
-   * single emission point for this event (collection-certificate-generator does not also emit
-   * it), and karma-points-processor-v2's CourseCompletionHandler dedupes on
-   * (userId, contextType, operationType, courseId) via doesEntryExist, so a reissue firing this
-   * again does not award points twice.
+   * NOTE (2026-09-22): No longer called from processElement's no-badge-path.
+   * A course with no certificate template configured is now treated as an invalid/incomplete
+   * setup rather than a valid completion scenario - the course-completion/karma event must NOT
+   * be raised from here in that case; the course owner needs to add a cert_templates entry for
+   * the batch. The single emission point for the COURSE_COMPLETION event is now
+   * collection-certificate-generator (CertificateGeneratorFunction.buildCourseCompletionEvent),
+   * fired only after a certificate has actually been (re)issued. This method and the unused
+   * config.courseCompletionOutputTag wiring are left in place for now rather than deleted, in
+   * case they need to be referenced while the change is being reviewed/rolled out - safe to
+   * remove once confirmed unused.
    */
   private def buildCourseCompletionEvent(event: Event): String = {
     val ets = System.currentTimeMillis()

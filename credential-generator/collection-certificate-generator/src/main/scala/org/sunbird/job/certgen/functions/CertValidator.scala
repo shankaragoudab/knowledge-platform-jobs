@@ -178,10 +178,15 @@ class CertValidator() {
   }
   
   def isNotIssued(event: Event)(config: CertificateGeneratorConfig, metrics: Metrics, cassandraUtil: CassandraUtil):Boolean = {
+    val userId = event.eData.getOrElse("userId", "")
+    val courseId = event.related.getOrElse("courseId", "")
+    val batchId = event.related.getOrElse("batchId", "")
+    val logCtx = s"userId=$userId, courseId=$courseId, batchId=$batchId, oldId=${event.oldId}"
     val query = QueryBuilder.select( "issued_certificates").from(config.dbKeyspace, config.dbEnrollmentTable)
-      .where(QueryBuilder.eq(config.dbUserId, event.eData.getOrElse("userId", "")))
-      .and(QueryBuilder.eq(config.dbCourseId, event.related.getOrElse("courseId", "")))
-      .and(QueryBuilder.eq(config.dbBatchId, event.related.getOrElse("batchId", "")))
+      .where(QueryBuilder.eq(config.dbUserId, userId))
+      .and(QueryBuilder.eq(config.dbCourseId, courseId))
+      .and(QueryBuilder.eq(config.dbBatchId, batchId))
+    logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][isNotIssued] Querying ${config.dbEnrollmentTable}: ${query.toString}, $logCtx")
     val row = cassandraUtil.findOne(query.toString)
     metrics.incCounter(config.enrollmentDbReadCount)
     if (null != row) {
@@ -190,8 +195,14 @@ class CertValidator() {
       val isCertIssued = !issuedCertificates.isEmpty && !issuedCertificates
         .filter(cert => Option(cert.get(config.numberOfCertGeneration)).map(_.asInstanceOf[String].toInt).getOrElse(1)==1
         ).isEmpty
-      ((null != event.oldId && !event.oldId.isEmpty) || !isCertIssued)
-    } else false
+      val isReissue = null != event.oldId && !event.oldId.isEmpty
+      val result = isReissue || !isCertIssued
+      logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][isNotIssued] Row found: issuedCertificates=$issuedCertificates, isCertIssued=$isCertIssued, isReissue=$isReissue => isNotIssued=$result, $logCtx")
+      result
+    } else {
+      logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][isNotIssued][no-row] No enrollment row found in ${config.dbEnrollmentTable} for this userId/courseId/batchId - treating as isNotIssued=false (certificate will NOT be generated), $logCtx")
+      false
+    }
   }
 
 }

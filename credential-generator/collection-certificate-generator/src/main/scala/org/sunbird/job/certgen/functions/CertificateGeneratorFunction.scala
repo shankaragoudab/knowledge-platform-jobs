@@ -80,10 +80,15 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
       certValidator.validateGenerateCertRequest(event, config.enableSuppressException)
       if(certValidator.isNotIssued(event)(config, metrics, cassandraUtil)) {
         logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][not-yet-issued] Proceeding to generate certificate: $logCtx")
-        if(config.enableRcCertificate) generateCertificateUsingRC(event, context)(metrics)
+        if(config.enableRcCertificate) {
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][path=RC] enableRcCertificate=true - generating via Registry/RC flow: $logCtx")
+          generateCertificateUsingRC(event, context)(metrics)
+        }
         else if ( config.allowedCourseCategoryForCertificteProcesser.contains(event.courseCategory)) {
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][path=standard] courseCategory=${event.courseCategory} in allowedCourseCategoryForCertificteProcesser - generating via standard flow: $logCtx")
           generateCertificate(event, context)(metrics)
         } else {
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][path=dynamic] courseCategory=${event.courseCategory} not in allowedCourseCategoryForCertificteProcesser and RC disabled - generating via dynamic-certificate flow: $logCtx")
           generateDynamicCertificateMap(event, context)(metrics)
         }
       } else {
@@ -306,9 +311,14 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
   }
 
   def updateUserEnrollmentTable(event: Event, certMetaData: UserEnrollmentData, context: KeyedProcessFunction[String, Event, String]#Context, version: String)(implicit metrics: Metrics): Unit = {
+    val logCtx = s"userId=${certMetaData.userId}, courseId=${certMetaData.courseId}, batchId=${certMetaData.batchId}, certName=${certMetaData.certificate.name}"
     logger.info("updating user enrollment table {}", certMetaData)
     val primaryFields = Map(config.userId.toLowerCase() -> certMetaData.userId, config.batchId.toLowerCase -> certMetaData.batchId, config.courseId.toLowerCase -> certMetaData.courseId)
     val records = getIssuedCertificatesFromUserEnrollmentTable(primaryFields)
+    logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable] Fetched ${records.size} enrollment row(s) to update, $logCtx")
+    if (records.isEmpty) {
+      logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable][no-row] No enrollment row found for this userId/courseId/batchId - issued_certificates will NOT be updated and the course-completion/karma event will NOT be fired for this certificate generation, $logCtx")
+    }
     if (records.nonEmpty) {
       records.foreach((row: Row) => {
         val issuedOn = row.getTimestamp("completedOn")
@@ -396,6 +406,7 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
         } else {
           metrics.incCounter(config.failedEventCount)
+          logger.error(s"[COURSE_COMPLETION][collection-certificate-generator][updateUserEnrollmentTable][failed] Cassandra update of issued_certificates returned false - certificate row was NOT persisted, downstream audit/notification/competency/badge/course-completion events will NOT be fired for this certificate, $logCtx")
           throw new Exception(s"Update certificates to enrolments failed: ${event}")
         }
 
