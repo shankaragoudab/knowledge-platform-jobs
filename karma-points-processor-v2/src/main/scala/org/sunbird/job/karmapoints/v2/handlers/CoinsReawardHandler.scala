@@ -430,7 +430,10 @@ class CoinsReawardHandler(config: KarmaPointsV2Config, cassandraUtil: CassandraU
    * frozen plan's identity - and the wallet's current (unmodified) balance as balance_after. */
   private[v2] def insertFailedReawardTransaction(request: CoinsReawardRequest)(implicit metrics: Metrics): Unit = {
     val (totalEarned, totalRedeemed) = readWallet(request.userId)
-    val failedAddInfo = cassandraUtil.buildAddInfo(null, config.STATUS -> config.STATUS_FAILED)
+    val failedAddInfo = cassandraUtil.buildAddInfo(null,
+      config.STATUS -> config.STATUS_FAILED,
+      config.ADDINFO_ORIGINAL_TRANSACTION_ID -> request.originalTransactionId,
+      config.ADDINFO_ORIGINAL_CREATED_AT -> request.originalCreatedAt)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, System.currentTimeMillis(), TransactionIdGenerator.generate(config),
       config.OPERATION_CREDIT, request.coinsToReaward, totalEarned - totalRedeemed,
       request.actionType, request.contextType, request.contextId, failedAddInfo)
