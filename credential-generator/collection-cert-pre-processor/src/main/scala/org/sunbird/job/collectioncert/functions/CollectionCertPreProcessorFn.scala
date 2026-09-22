@@ -53,22 +53,30 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
     override def processElement(event: Event,
                                 context: KeyedProcessFunction[String, Event, String]#Context,
                                 metrics: Metrics): Unit = {
+        val logCtx = s"userId=${event.userId}, courseId=${event.courseId}, batchId=${event.batchId}, action=${event.action}, reIssue=${event.reIssue}, partition=${event.partition}, offset=${event.offset}"
+        logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][received] Processing event: $logCtx")
         try {
             metrics.incCounter(config.totalEventsCount)
             if(event.isValid()(config)) {
               val certTemplates = fetchTemplates(event)(metrics).filter(template => template._2.getOrElse("url", "").asInstanceOf[String].contains(".svg"))
               if(!certTemplates.isEmpty) {
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][badge-path] certTemplates found (${certTemplates.size}) - forwarding to collection-certificate-generator: $logCtx")
                 certTemplates.map(template => {
                   val certEvent = issueCertificate(event, template._2)(cassandraUtil, cache, contentCache, metrics, config, httpUtil)
                   Option(certEvent).map(e => {
                     context.output(config.generateCertificateOutputTag, certEvent)
-                    metrics.incCounter(config.successEventCount)}
-                  ).getOrElse({metrics.incCounter(config.skippedEventCount)})
+                    metrics.incCounter(config.successEventCount)
+                    logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][badge-path][forwarded] generate-certificate event emitted: $logCtx")}
+                  ).getOrElse({
+                    metrics.incCounter(config.skippedEventCount)
+                    logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][badge-path][skipped] issueCertificate returned null (criteria not met / already processed for this template): $logCtx")
+                  })
                 })
               } else {
                 logger.info(s"No certTemplates available for batchId :${event.batchId}")
                 metrics.incCounter(config.skippedEventCount)
                 val courseCompletionEvent = buildCourseCompletionEvent(event)
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][no-badge-path] Firing course completion event: $logCtx, payload=$courseCompletionEvent")
                 context.output(config.courseCompletionOutputTag, courseCompletionEvent)
               }
             } else if (event.isValidEventType()(config)) {
@@ -90,16 +98,16 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
                     metrics.incCounter(config.skippedEventCount)
                 }
             } else {
-                logger.info(s"Invalid request : ${event}")
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][invalid] Invalid request (neither issue-certificate nor issue-event-certificate action, or missing required fields): userId=${event.userId}, courseId=${event.courseId}, batchId=${event.batchId}, action=${event.action}")
                 metrics.incCounter(config.skippedEventCount)
             }
         } catch {
             case ex: Exception => {
                 val failedEvent = generateFailedEvent(event)
-                logger.info(s"Collection cert Pre Processor failed for event: $failedEvent")
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][failed] Collection cert Pre Processor failed for event: $failedEvent")
                 context.output(config.generateCertificateFailedOutputTag, failedEvent)
                 metrics.incCounter(config.failedEventCount)
-                logger.error(s"Error processing event for userId: ${event.userId}, courseId: ${event.courseId}, batchId: ${event.batchId}, partition: ${event.partition}, offset: ${event.offset}", ex)
+                logger.error(s"[COURSE_COMPLETION][collection-cert-pre-processor][failed] Error processing event for userId: ${event.userId}, courseId: ${event.courseId}, batchId: ${event.batchId}, partition: ${event.partition}, offset: ${event.offset}", ex)
             }
         }
         

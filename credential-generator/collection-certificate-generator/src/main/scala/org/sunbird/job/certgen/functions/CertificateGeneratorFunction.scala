@@ -72,11 +72,14 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
                               context: KeyedProcessFunction[String, Event, String]#Context,
                               metrics: Metrics): Unit = {
     metrics.incCounter(config.totalEventsCount)
+    val logCtx = s"userId=${event.userId}, courseId=${event.courseId}, batchId=${event.batchId}, reIssue=${event.reIssueDate > 0}, partition=${event.partition}, offset=${event.offset}"
+    logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][received] Processing issue-certificate event: $logCtx")
     try {
       val certValidator = new CertValidator()
       logger.info("Certificate generator | is rc integration enabled: " + config.enableRcCertificate)
       certValidator.validateGenerateCertRequest(event, config.enableSuppressException)
       if(certValidator.isNotIssued(event)(config, metrics, cassandraUtil)) {
+        logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][not-yet-issued] Proceeding to generate certificate: $logCtx")
         if(config.enableRcCertificate) generateCertificateUsingRC(event, context)(metrics)
         else if ( config.allowedCourseCategoryForCertificteProcesser.contains(event.courseCategory)) {
           generateCertificate(event, context)(metrics)
@@ -85,12 +88,13 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
         }
       } else {
         metrics.incCounter(config.skippedEventCount)
-        logger.info(s"Certificate already issued for: ${event.eData.getOrElse("userId", "")} ${event.related}")
+        logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][badge-path][suppressed] Certificate already issued - course completion event NOT fired: $logCtx, related=${event.related}")
       }
       metrics.incCounter(config.successEventCount)
     } catch {
       case e: Exception =>
         metrics.incCounter(config.failedEventCount)
+        logger.error(s"[COURSE_COMPLETION][collection-certificate-generator][failed] Error processing issue-certificate event: $logCtx, error=${e.getMessage}", e)
         throw new InvalidEventException(e.getMessage, Map("partition" -> event.partition, "offset" -> event.offset), e)
     }
   }
@@ -387,7 +391,7 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           val badgeAwardEvent = buildBadgeAwardEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
           context.output(config.userBadgeAwardOutputTag, badgeAwardEvent)
           val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate)
-          logger.info("Firing course completion event for user: {} course: {} batch: {}", certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
+          logger.info(s"[COURSE_COMPLETION][collection-certificate-generator][badge-path] Firing course completion event: userId=${certMetaData.userId}, courseId=${certMetaData.courseId}, batchId=${certMetaData.batchId}, sourceEventPartition=${event.partition}, sourceEventOffset=${event.offset}, payload=$courseCompletionEvent")
           context.output(config.courseCompletionOutputTag, courseCompletionEvent)
           //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
         } else {

@@ -63,10 +63,12 @@ trait IssueCertificateHelper {
     }
 
     def validateEnrolmentCriteria(event: Event, enrollmentCriteria: Map[String, AnyRef], certName: String, additionalProps: Map[String, List[String]])(metrics:Metrics, cassandraUtil: CassandraUtil, config:CollectionCertPreProcessorConfig): EnrolledUser = {
+        val logCtx = s"userId=${event.userId}, courseId=${event.courseId}, batchId=${event.batchId}, certName=$certName, reIssue=${event.reIssue}"
         if(!enrollmentCriteria.isEmpty) {
             val query = QueryBuilder.select().from(config.keyspace, config.userEnrolmentsTable)
               .where(QueryBuilder.eq(config.dbUserId, event.userId)).and(QueryBuilder.eq(config.dbCourseId, event.courseId))
               .and(QueryBuilder.eq(config.dbBatchId, event.batchId))
+            logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria] Querying ${config.userEnrolmentsTable}: ${query.toString}, $logCtx")
             val row = cassandraUtil.findOne(query.toString)
             metrics.incCounter(config.dbReadCount)
             val enrolmentAdditionProps = additionalProps.getOrElse(config.enrollment, List[String]())
@@ -76,14 +78,26 @@ trait IssueCertificateHelper {
                 val isCertIssued = !issuedCertificates.isEmpty && !issuedCertificates.filter(cert => certName.equalsIgnoreCase(cert.getOrDefault(config.name,"").asInstanceOf[String])).isEmpty
                 val status = row.getInt(config.status)
                 val criteriaStatus = enrollmentCriteria.getOrElse(config.status, 2)
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria] Row found: active=$active, status=$status, criteriaStatus=$criteriaStatus, isCertIssued=$isCertIssued, issuedCertificates=$issuedCertificates, $logCtx")
                 val oldId = if(isCertIssued && event.reIssue) issuedCertificates.filter(cert => certName.equalsIgnoreCase(cert.getOrDefault(config.name,"").asInstanceOf[String]))
                   .map(cert => cert.getOrDefault(config.identifier, "")).head else ""
                 val userId = if(active && (criteriaStatus == status) && (!isCertIssued || event.reIssue)) event.userId else ""
+                if(userId.isEmpty) {
+                    logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria][blocked] Enrolment criteria not satisfied - active=$active (need true), status match=${criteriaStatus == status} (status=$status, criteriaStatus=$criteriaStatus), isCertIssued=$isCertIssued, reIssue=${event.reIssue} => returning empty EnrolledUser, $logCtx")
+                } else {
+                    logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria][passed] Enrolment criteria satisfied, oldId=$oldId, $logCtx")
+                }
                 val issuedOn = row.getTimestamp(config.completedOn)
                 val addProps = enrolmentAdditionProps.map(prop => (prop -> row.getObject(prop.toLowerCase))).toMap
                 EnrolledUser(userId, oldId, issuedOn, {if(addProps.nonEmpty) Map[String, Any](config.enrollment -> addProps) else Map()})
-            } else EnrolledUser("", "")
-        } else EnrolledUser(event.userId, "") 
+            } else {
+                logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria][no-row] No row found in ${config.userEnrolmentsTable} for this userId/courseId/batchId combination - check the values actually on the incoming event match what's in Cassandra (case sensitivity, courseId being a linked/leaf id vs collection id, etc.), $logCtx")
+                EnrolledUser("", "")
+            }
+        } else {
+            logger.info(s"[COURSE_COMPLETION][collection-cert-pre-processor][validateEnrolmentCriteria][no-criteria] enrollmentCriteria empty on template - skipping enrolment check entirely, $logCtx")
+            EnrolledUser(event.userId, "")
+        }
     }
 
     def validateAssessmentCriteria(event: Event, assessmentCriteria: Map[String, AnyRef], enrolledUser: String, additionalProps: Map[String, List[String]])(metrics:Metrics, cassandraUtil: CassandraUtil, contentCache: DataCache, config:CollectionCertPreProcessorConfig):AssessedUser = {
