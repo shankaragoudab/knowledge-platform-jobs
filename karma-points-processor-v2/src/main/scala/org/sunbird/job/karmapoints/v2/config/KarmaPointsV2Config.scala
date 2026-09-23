@@ -211,6 +211,11 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   // COINS_REDEMPTION (C3): prefix for the `pendingEnrolment_<userId>_<contextId>` Redis status key -
   // see RedisUtil.setPendingEnrolmentStatus.
   val PENDING_ENROLMENT_PREFIX = "pendingEnrolment"
+  // JSON field name for the requested Karma Coin amount in the pendingEnrolment Redis value.
+  val PENDING_ENROLMENT_KARMA_COINS = "karmaCoins"
+  // TTL (seconds) applied to every pendingEnrolment Redis write (PENDING/FAILED) - mandatory,
+  // no default: a missing value fails job startup rather than silently guessing a TTL.
+  val pendingEnrolmentTTLSeconds: Int = config.getInt("karmaCoin.pendingEnrolment.ttlSeconds")
 
   val TOTAL_EARNED = "total_earned"
   val TOTAL_REDEEMED = "total_redeemed"

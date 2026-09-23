@@ -68,7 +68,9 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         val rawUserId = event.dataString("userId")
         val rawContextId = event.dataString("contextId")
         if (StringUtils.isNotEmpty(rawUserId) && StringUtils.isNotEmpty(rawContextId)) {
-          redisUtil.setPendingEnrolmentStatus(rawUserId, rawContextId, config.STATUS_FAILED)
+          val rawCourseName = event.dataString("courseName")
+          val rawCoinsToRedeem = event.dataLong("coinsToRedeem", 0L)
+          redisUtil.setPendingEnrolmentStatus(rawUserId, rawContextId, config.STATUS_FAILED, rawCourseName, rawCoinsToRedeem)
         }
         throw ex
     }
@@ -127,7 +129,8 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         // Best-effort FAILED status write; RedisUtil.setPendingEnrolmentStatus already never
         // throws (same fail-safe pattern as every other RedisUtil method), so this can never mask
         // or replace the original exception being rethrown below.
-        redisUtil.setPendingEnrolmentStatus(request.userId, request.contextId, config.STATUS_FAILED)
+        redisUtil.setPendingEnrolmentStatus(request.userId, request.contextId, config.STATUS_FAILED,
+          request.courseName, request.coinsToRedeem)
         throw ex
     }
   }
@@ -321,12 +324,13 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
   /** Applies a frozen plan, in this exact order (C3): wallet -> DEBIT transaction ->
    * EXT_COURSE_ENROLLMENT publish (asynchronous, fire-and-forget - only a synchronous send-call
    * failure throws and aborts this method; see [[PaidCourseEnrolmentProducer.send]]) -> lookup
-   * SUCCESS -> Redis `pendingEnrolment_<userId>_<contextId>` status SUCCESS -> best-effort wallet-cache refresh
-   * (own local try/catch - a failure here is logged only, never rethrown, so it can never reach
-   * `doHandle`'s outer catch and flip `pendingEnrolment` back to FAILED after Cassandra is
-   * already SUCCESS). The lookup is never marked SUCCESS unless the Kafka publish was already
-   * acknowledged. Every write here is an absolute-value upsert or a deterministic-key insert
-   * driven by the plan, so the whole method remains safe to re-run in full on retry/resume. No
+   * SUCCESS -> best-effort wallet-cache refresh (own local try/catch - a failure here is logged
+   * only, never rethrown). Redis `pendingEnrolment_<userId>_<contextId>` is deliberately NOT
+   * touched on this success path - only PENDING/FAILED states are ever written there now; a
+   * successful redemption simply leaves whatever pendingEnrolment entry existed to expire via its
+   * own TTL. The lookup is never marked SUCCESS unless the Kafka publish was already acknowledged.
+   * Every write here is an absolute-value upsert or a deterministic-key insert driven by the plan,
+   * so the whole method remains safe to re-run in full on retry/resume. No
    * `user_karma_coin_monthly_summary` write - DEBIT has no monthly cap. */
   private[v2] def applyRedemptionPlan(request: CoinsRedemptionRequest, plan: RedemptionPlan)
                                      (implicit metrics: Metrics): Unit = {
@@ -363,7 +367,6 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
         s"userId=${request.userId}, contextId=${request.contextId}, " +
         s"transactionId=${plan.transactionId}"
     )
-    redisUtil.setPendingEnrolmentStatus(request.userId, request.contextId, config.STATUS_SUCCESS)
 
     try {
       // DEBIT never writes user_karma_coin_monthly_summary, so reading the current month's figure
@@ -373,7 +376,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
     } catch {
       case ex: Exception =>
         logger.error(s"Failed to refresh Redis wallet-cache after an already-successful COINS_REDEMPTION " +
-          s"(non-critical, redemption and pendingEnrolment are already SUCCESS), userId=${request.userId}, " +
+          s"(non-critical, redemption is already SUCCESS in Cassandra), userId=${request.userId}, " +
           s"contextId=${request.contextId}, transactionId=${plan.transactionId}", ex)
     }
   }

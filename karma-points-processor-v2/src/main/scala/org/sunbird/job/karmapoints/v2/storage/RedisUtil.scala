@@ -120,23 +120,31 @@ class RedisUtil(dataCache: DataCache, config: KarmaPointsV2Config) {
     }
   }
 
-  private def karmaCoinConvertLockKeyFor(userId: String): String = s"${config.KARMA_COIN_CONVERT_LOCK_PREFIX}:$userId"
+  /** `referenceId` is `contextId` - the mandatory, per-request UUID POINTS_CONVERSION events carry
+   * (see PointsConversionHandler's class doc) - so this key matches the one the upstream caller
+   * (whoever sets this lock before publishing the event) derives from the same field. */
+  private def karmaCoinConvertLockKeyFor(userId: String, referenceId: String): String =
+    s"${config.KARMA_COIN_CONVERT_LOCK_PREFIX}:$userId:$referenceId"
 
   /**
    * Deletes the external Karma Coin conversion lock key (set by the upstream caller before
    * publishing a POINTS_CONVERSION event) once that conversion has fully completed - so a
-   * subsequent conversion request for the same user is no longer blocked by it. Best-effort,
-   * same fail-safe shape as every other method in this class. Reuses jobs-core's existing
-   * `DataCache.delWithRetry` - no new Redis primitive.
+   * subsequent conversion request for the same user+contextId is no longer blocked by it.
+   * `referenceId` must be the same `contextId` the upstream caller used when setting the lock, or
+   * this deletes nothing (best-effort - no error either way). Best-effort, same fail-safe shape as
+   * every other method in this class. Reuses jobs-core's existing `DataCache.delWithRetry` - no new
+   * Redis primitive.
    */
-  def deleteKarmaCoinConvertLock(userId: String): Unit = {
+  def deleteKarmaCoinConvertLock(userId: String, referenceId: String): Unit = {
     try {
-      dataCache.delWithRetry(karmaCoinConvertLockKeyFor(userId))
+      dataCache.delWithRetry(karmaCoinConvertLockKeyFor(userId, referenceId))
     } catch {
       case ex@(_: JedisConnectionException | _: JedisException) =>
-        logger.error(s"Failed to delete karma coin convert lock in Redis for userId=$userId (best-effort, not fatal)", ex)
+        logger.error(s"Failed to delete karma coin convert lock in Redis for userId=$userId, " +
+          s"referenceId=$referenceId (best-effort, not fatal)", ex)
       case ex: Exception =>
-        logger.error(s"Unexpected error deleting karma coin convert lock in Redis for userId=$userId (best-effort, not fatal)", ex)
+        logger.error(s"Unexpected error deleting karma coin convert lock in Redis for userId=$userId, " +
+          s"referenceId=$referenceId (best-effort, not fatal)", ex)
     }
   }
 
@@ -145,16 +153,21 @@ class RedisUtil(dataCache: DataCache, config: KarmaPointsV2Config) {
 
   /**
    * Updates the `pendingEnrolment_<userId>_<contextId>` Redis status key used by COINS_REDEMPTION
-   * (C3): PENDING -> FAILED on any redemption failure, PENDING -> SUCCESS only after the full
-   * redemption flow (wallet, transaction, Kafka-acknowledged enrollment publish, Cassandra lookup
-   * SUCCESS) has completed - callers are responsible for that ordering, this method only writes
-   * the given `status`. Best-effort, same fail-safe shape as every other method in this class -
-   * a Redis outage here must never fail/mask the redemption itself. Reuses jobs-core's existing
-   * `DataCache.setWithRetry` - no new Redis primitive.
+   * (C3): written on PENDING/FAILED redemption states (callers decide when). Value is a small JSON
+   * object `{"status":..., "courseName":..., "karmaCoins":...}` rather than a bare status string,
+   * so a reader doesn't need to go back to Cassandra just to show course/amount context. TTL is
+   * `config.pendingEnrolmentTTLSeconds`, applied fresh on every write via `SETEX` (`DataCache.set`)
+   * - starts counting from this write, same as any other write to this key. Best-effort, same
+   * fail-safe shape as every other method in this class - a Redis outage here must never fail/mask
+   * the redemption itself.
    */
-  def setPendingEnrolmentStatus(userId: String, contextId: String, status: String): Unit = {
+  def setPendingEnrolmentStatus(userId: String, contextId: String, status: String, courseName: String, karmaCoins: Long): Unit = {
     try {
-      dataCache.setWithRetry(pendingEnrolmentKeyFor(userId, contextId), status)
+      val value = new java.util.HashMap[String, Any]()
+      value.put(config.STATUS, status)
+      value.put(config.ADDINFO_COURSE_NAME, courseName)
+      value.put(config.PENDING_ENROLMENT_KARMA_COINS, karmaCoins)
+      dataCache.set(pendingEnrolmentKeyFor(userId, contextId), JSONUtil.serialize(value), config.pendingEnrolmentTTLSeconds)
     } catch {
       case ex@(_: JedisConnectionException | _: JedisException) =>
         logger.error(s"Failed to update pendingEnrolment Redis status to $status for userId=$userId, " +
