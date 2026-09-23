@@ -1640,11 +1640,11 @@ karma-points-processor-v2:
     karmaCoin {
       pointsConversion {
       monthlyLimit = 300
+      ratio = "1:1"
     }
     transactionId {
     length = 12
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    }
     }
     redis {
       database {
@@ -1657,8 +1657,15 @@ karma-points-processor-v2:
         coinsReawardDedupEnabled = true
         releaseDedupOnException = true
       }
-      host = {{ dp_redis_host }}
+    }
+    }
+    redis {
+      database {
+        karmaPointCache.id = 0
+      }
+      host = localhost
       port = 6379
+      cache.ttl.seconds = 259200
     }
     metrics {
       enabled = true
