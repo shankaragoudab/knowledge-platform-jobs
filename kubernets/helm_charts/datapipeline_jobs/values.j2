@@ -1669,7 +1669,7 @@ karma-points-processor-v2:
       enabled = true
       reporter = "slf4j"
     }
-
+}
   flink-conf: |+
     jobmanager.memory.flink.size: {{ flink_job_names['karma-points-processor-v2'].jobmanager_memory }}
     taskmanager.memory.flink.size: {{ flink_job_names['karma-points-processor-v2'].taskmanager_memory }}
