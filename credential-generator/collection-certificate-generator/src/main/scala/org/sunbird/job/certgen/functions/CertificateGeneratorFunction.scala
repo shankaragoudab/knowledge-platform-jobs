@@ -386,6 +386,9 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           logger.info("Competency mapping event fired successfully: {}", competencyEvent)
           val badgeAwardEvent = buildBadgeAwardEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
           context.output(config.userBadgeAwardOutputTag, badgeAwardEvent)
+          val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate)
+          logger.info("Firing course completion event for user: {} course: {} batch: {}", certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
+          context.output(config.courseCompletionOutputTag, courseCompletionEvent)
           //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
         } else {
           metrics.incCounter(config.failedEventCount)
@@ -566,5 +569,36 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
     )
     ScalaJsonUtil.serialize(Map[String, AnyRef]("edata" -> edata))
   } 
+
+  /**
+   * Builds the flat BE_JOB_REQUEST envelope (eventType/version as sibling top-level keys,
+   * consumed by karma-points-processor-v2) for the badge/templated completion path.
+   */
+  private def buildCourseCompletionEvent(userId: String, contentId: String, batchId: String, completedLanguage: String, reIssueDate: Long): String = {
+    val ets = System.currentTimeMillis()
+    val mid = s"LP.$ets.${java.util.UUID.randomUUID().toString}"
+    val edata = Map[String, AnyRef](
+      "userIds" -> List(userId),
+      "courseId" -> contentId,
+      "action" -> "issue-certificate",
+      "iteration" -> Int.box(1),
+      "trigger" -> "auto-issue",
+      "batchId" -> batchId,
+      "reIssue" -> Boolean.box(reIssueDate > 0),
+      "completedLanguage" -> completedLanguage
+    )
+    val payload = Map[String, AnyRef](
+      "eid" -> "BE_JOB_REQUEST",
+      "ets" -> Long.box(ets),
+      "mid" -> mid,
+      "actor" -> Map[String, AnyRef]("id" -> "Course Certificate Generator", "type" -> "System"),
+      "context" -> Map[String, AnyRef]("pdata" -> Map[String, AnyRef]("ver" -> "1.0", "id" -> "org.sunbird.platform")),
+      "object" -> Map[String, AnyRef]("id" -> s"${batchId}_$contentId", "type" -> "CourseCertificateGeneration"),
+      "eventType" -> "COURSE_COMPLETION",
+      "edata" -> edata,
+      "version" -> Int.box(2)
+    )
+    ScalaJsonUtil.serialize(payload)
+  }
 
 }

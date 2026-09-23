@@ -56,9 +56,6 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
         try {
             metrics.incCounter(config.totalEventsCount)
             if(event.isValid()(config)) {
-              val courseCompletionEvent = buildCourseCompletionEvent(event)
-              context.output(config.courseCompletionOutputTag, courseCompletionEvent)
-
               val certTemplates = fetchTemplates(event)(metrics).filter(template => template._2.getOrElse("url", "").asInstanceOf[String].contains(".svg"))
               if(!certTemplates.isEmpty) {
                 certTemplates.map(template => {
@@ -139,41 +136,4 @@ class CollectionCertPreProcessorFn(config: CollectionCertPreProcessorConfig, htt
         val eventString = s"""{"eid": "BE_JOB_REQUEST", "ets": $ets, "mid": "$mid", "actor": {"id": "Course Certificate Generator", "type": "System"}, "context": {"pdata": {"ver": "1.0", "id": "org.sunbird.platform"}}, "object": {"id": "${event.batchId}_${event.courseId}", "type": "ProgramCertificatePreProcessorGeneration"}, "edata": {"userId": "[${event.userId}]", "action": "issue-certificate", "iteration": 1, "trigger": "auto-issue", "batchId": "${event.batchId}", "completedLanguage": ["${event.completedLanguage}"], "courseId": "${event.courseId}"}}"""
         eventString
     }
-
-  /**
-   * Builds the flat BE_JOB_REQUEST envelope (eventType/version as sibling top-level keys,
-   * consumed by karma-points-processor-v2). Fired unconditionally for every valid
-   * issue-certificate event, independent of whether a certificate/badge template exists for
-   * the course - karma points are earned for completion, not for badge issuance. This is the
-   * single emission point for this event (collection-certificate-generator does not also emit
-   * it), and karma-points-processor-v2's CourseCompletionHandler dedupes on
-   * (userId, contextType, operationType, courseId) via doesEntryExist, so a reissue firing this
-   * again does not award points twice.
-   */
-  private def buildCourseCompletionEvent(event: Event): String = {
-    val ets = System.currentTimeMillis()
-    val mid = s"LP.$ets.${UUID.randomUUID().toString}"
-    val edata = Map[String, AnyRef](
-      "userIds" -> List(event.userId),
-      "courseId" -> event.courseId,
-      "action" -> "issue-certificate",
-      "iteration" -> Int.box(1),
-      "trigger" -> "auto-issue",
-      "batchId" -> event.batchId,
-      "reIssue" -> Boolean.box(event.reIssue),
-      "completedLanguage" -> event.completedLanguage
-    )
-    val payload = Map[String, AnyRef](
-      "eid" -> "BE_JOB_REQUEST",
-      "ets" -> Long.box(ets),
-      "mid" -> mid,
-      "actor" -> Map[String, AnyRef]("id" -> "Course Certificate Generator", "type" -> "System"),
-      "context" -> Map[String, AnyRef]("pdata" -> Map[String, AnyRef]("ver" -> "1.0", "id" -> "org.sunbird.platform")),
-      "object" -> Map[String, AnyRef]("id" -> s"${event.batchId}_${event.courseId}", "type" -> "CourseCertificateGeneration"),
-      "eventType" -> "COURSE_COMPLETION",
-      "edata" -> edata,
-      "version" -> Int.box(2)
-    )
-    ScalaJsonUtil.serialize(payload)
-  }
 }

@@ -27,8 +27,6 @@ class CollectionCertPreProcessorConfig(override val config: Config) extends Base
     override val kafkaConsumerParallelism: Int = config.getInt("task.consumer.parallelism")
     val generateCertificateParallelism:Int = config.getInt("task.generate_certificate.parallelism")
     val kafkaEventOutputTopic: String = config.getString("kafka.event.output.topic")
-    val kafkaCourseCompletionTopic: String = config.getString("kafka.output.course.completion.topic")
-    val courseCompletionProducer = "course-completion-karma-points-sink"
     val generateEventCertificateProducer = "generate-event-certificate-sink"
     val generateEventCertificateParallelism:Int = config.getInt("task.generate_event_certificate.parallelism")
     
@@ -37,8 +35,6 @@ class CollectionCertPreProcessorConfig(override val config: Config) extends Base
     val generateCertificateOutputTag: OutputTag[String] = OutputTag[String](generateCertificateOutputTagName)
     val generateEventCertificateOutputTagName = "generate-event-certificate-request"
     val generateEventCertificateOutputTag: OutputTag[String] = OutputTag[String](generateEventCertificateOutputTagName)
-    val courseCompletionOutputTagName = "course-completion-karma-points-event"
-    val courseCompletionOutputTag: OutputTag[String] = OutputTag[String](courseCompletionOutputTagName)
 
     //Cassandra config
     val dbHost: String = config.getString("lms-cassandra.host")
