@@ -65,6 +65,11 @@ class CertificateGeneratorStreamTask(config: CertificateGeneratorConfig, kafkaCo
       .name(config.certificateGeneratorBadgeAwardProducer)
       .uid(config.certificateGeneratorBadgeAwardProducer)
 
+    processStreamTask.getSideOutput(config.courseCompletionOutputTag)
+      .addSink(kafkaConnector.kafkaStringSink(config.kafkaCourseCompletionTopic))
+      .name(config.certificateGeneratorCourseCompletionProducer)
+      .uid(config.certificateGeneratorCourseCompletionProducer)
+
     env.execute(config.jobName)
   }
 
