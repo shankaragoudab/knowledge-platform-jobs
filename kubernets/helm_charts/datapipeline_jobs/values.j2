@@ -687,7 +687,6 @@ collection-cert-pre-processor:
       output.failed.topic = {{ env_name }}.issue.certificate.failed
       event.output.topic = {{ env_name }}.event.generate.certificate.request
       groupId = {{ env_name }}-collection-cert-pre-processor-group
-      output.course.completion.topic = {{ env_name }}.karma.points.unified.v2.event
     }
     task {
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
@@ -796,7 +795,7 @@ collection-certificate-generator:
       program.cert.output.topic= {{ env_name }}.issue.program.certificate.request
       output.competency.topic = "{{env_name}}.user.competency.mapping.event"
       output.badge.topic = {{ env_name }}.user.badge.award.request
-      output.course.completion.topic = "{{env_name}}.karma.points.unified.v2.event"
+      output.course.completion.topic = {{ env_name }}.karma.points.unified.v2.event
     }
     task {
       restart-strategy.attempts = {{ restart_attempts }} # max 3 restart attempts
