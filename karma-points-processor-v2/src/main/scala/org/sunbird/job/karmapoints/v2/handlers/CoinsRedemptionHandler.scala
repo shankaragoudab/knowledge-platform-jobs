@@ -341,6 +341,7 @@ class CoinsRedemptionHandler(config: KarmaPointsV2Config, cassandraUtil: Cassand
 
     val balanceAfter = plan.targetTotalEarned - plan.targetTotalRedeemed
     val transactionAddInfo = cassandraUtil.buildAddInfo(null,
+      config.STATUS -> config.STATUS_SUCCESS,
       config.ADDINFO_COURSE_NAME -> request.courseName,
       config.ADDINFO_PROVIDER_NAME -> request.providerName)
     cassandraUtil.insertKarmaCoinTransaction(request.userId, plan.createdAt, plan.transactionId, config.OPERATION_DEBIT,
