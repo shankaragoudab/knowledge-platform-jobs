@@ -14,7 +14,7 @@ import redis.clients.jedis.exceptions.{JedisConnectionException, JedisException}
  * request-level dedup claim keyed by `userId|contextType|contextId` (a first-level, best-effort
  * duplicate filter in front of Cassandra), and the `CB_EXT_karmaCoinConvertLock:<userId>:<contextId>`
  * lock all use `dataCache` (DB `config.cacheDbId`). The one exception is
- * `pendingEnrolment_<userId>_<contextId>` (COINS_REDEMPTION), which uses the separate
+ * `pendingEnrolment_<userId>_<contextId>` (COINS_REDEMPTION failure status), which uses the separate
  * `pendingEnrolmentDataCache` (DB `config.pendingEnrolmentCacheDbId`) exclusively - see
  * [[setPendingEnrolmentStatus]]. Redis is never read for business decisions here (V1 never did
  * either) and is never the authoritative claim (the dedup key is a fast-path optimization, not a
