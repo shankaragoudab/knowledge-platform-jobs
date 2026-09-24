@@ -46,6 +46,10 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
 
   // Redis
   val cacheDbId: Int = if (config.hasPath("redis.database.karmaPointCache.id")) config.getInt("redis.database.karmaPointCache.id") else 0
+  // Dedicated Redis logical DB for the COINS_REDEMPTION pendingEnrolment_<userId>_<contextId>
+  // failure-status key only (RedisUtil.setPendingEnrolmentStatus) - every other Redis operation
+  // stays on cacheDbId.
+  val pendingEnrolmentCacheDbId: Int = if (config.hasPath("redis.database.pendingEnrolmentCache.id")) config.getInt("redis.database.pendingEnrolmentCache.id") else 1
   val metaRedisHost: String = config.getString("redis.host")
   val metaRedisPort: Int = config.getInt("redis.port")
   val karmaRedisTTLSeconds: Int = if (config.hasPath("redis.cache.ttl.seconds")) config.getInt("redis.cache.ttl.seconds") else 259200

@@ -7,16 +7,21 @@ import org.sunbird.job.util.JSONUtil
 import redis.clients.jedis.exceptions.{JedisConnectionException, JedisException}
 
 /**
- * Thin wrapper over jobs-core's [[DataCache]] - same shared connection/DB index for every key this
- * class touches: Karma Points' `user:karmaPoints:<userId>` (a write-through mirror of the Cassandra
- * summary total, same as V1), Karma Coin's `user:karmaCoins:<userId>` (a write-through mirror of the
- * Cassandra wallet), and Karma Coin's request-level dedup claim keyed by `userId|contextType|contextId`
- * (a first-level, best-effort duplicate filter in front of Cassandra). Redis is never read for
- * business decisions here (V1 never did either) and is never the authoritative claim (the dedup key
- * is a fast-path optimization, not a substitute for `user_karma_coin_lookup`), so failures are
- * best-effort: logged and swallowed (or failed open), never escalated to a job restart.
+ * Thin wrapper over jobs-core's [[DataCache]] - `dataCache` is the shared connection/DB index for
+ * every key this class touches EXCEPT one: Karma Points' `user:karmaPoints:<userId>` (a
+ * write-through mirror of the Cassandra summary total, same as V1), Karma Coin's
+ * `user:karmaCoins:<userId>` (a write-through mirror of the Cassandra wallet), Karma Coin's
+ * request-level dedup claim keyed by `userId|contextType|contextId` (a first-level, best-effort
+ * duplicate filter in front of Cassandra), and the `CB_EXT_karmaCoinConvertLock:<userId>:<contextId>`
+ * lock all use `dataCache` (DB `config.cacheDbId`). The one exception is
+ * `pendingEnrolment_<userId>_<contextId>` (COINS_REDEMPTION failure status), which uses the separate
+ * `pendingEnrolmentDataCache` (DB `config.pendingEnrolmentCacheDbId`) exclusively - see
+ * [[setPendingEnrolmentStatus]]. Redis is never read for business decisions here (V1 never did
+ * either) and is never the authoritative claim (the dedup key is a fast-path optimization, not a
+ * substitute for `user_karma_coin_lookup`), so failures are best-effort: logged and swallowed (or
+ * failed open), never escalated to a job restart.
  */
-class RedisUtil(dataCache: DataCache, config: KarmaPointsV2Config) {
+class RedisUtil(dataCache: DataCache, pendingEnrolmentDataCache: DataCache, config: KarmaPointsV2Config) {
 
   private[this] val logger = LoggerFactory.getLogger(classOf[RedisUtil])
 
@@ -167,7 +172,7 @@ class RedisUtil(dataCache: DataCache, config: KarmaPointsV2Config) {
       value.put(config.STATUS, status)
       value.put(config.ADDINFO_COURSE_NAME, courseName)
       value.put(config.PENDING_ENROLMENT_KARMA_COINS, karmaCoins)
-      dataCache.set(pendingEnrolmentKeyFor(userId, contextId), JSONUtil.serialize(value), config.pendingEnrolmentTTLSeconds)
+      pendingEnrolmentDataCache.set(pendingEnrolmentKeyFor(userId, contextId), JSONUtil.serialize(value), config.pendingEnrolmentTTLSeconds)
     } catch {
       case ex@(_: JedisConnectionException | _: JedisException) =>
         logger.error(s"Failed to update pendingEnrolment Redis status to $status for userId=$userId, " +
@@ -178,5 +183,8 @@ class RedisUtil(dataCache: DataCache, config: KarmaPointsV2Config) {
     }
   }
 
-  def close(): Unit = dataCache.close()
+  def close(): Unit = {
+    dataCache.close()
+    pendingEnrolmentDataCache.close()
+  }
 }
