@@ -1641,15 +1641,15 @@ karma-points-processor-v2:
       pointsConversion {
         monthlyLimit = 300
         ratio = "1:1"
-        
-        pendingEnrolment {
+      }
+      pendingEnrolment {
           ttlSeconds = 5
-        }
       }
     }
+    
     transactionId {
-    length = 12
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+      length = 12
+      alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     }
     
     redis {
