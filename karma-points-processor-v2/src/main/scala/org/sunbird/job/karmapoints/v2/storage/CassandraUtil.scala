@@ -131,6 +131,25 @@ class CassandraUtil(config: KarmaPointsV2Config, cassandraUtil: JobsCoreCassandr
     }
 
   /**
+   * VERIFIED_PROFILE idempotency lookup - reads `user_karma_points_credit_lookup` using the plain
+   * `userId` as `user_karma_points_key` (no `userId|contextType|contextId` composite, unlike
+   * [[fetchUserKarmaPointsCreditLookup]] above) - VERIFIED_PROFILE has no context, it's a
+   * once-ever-per-user marker.
+   */
+  def fetchVerifiedProfileCreditLookup(userId: String, operationType: String): util.List[Row] = guard("fetchVerifiedProfileCreditLookup") {
+    val query: Select = QueryBuilder.select().from(config.sunbird_keyspace, config.user_karma_points_credit_lookup_table)
+    query.where(QueryBuilder.eq(config.DB_COLUMN_USER_KARMA_POINTS_KEY, userId))
+      .and(QueryBuilder.eq(config.DB_COLUMN_OPERATION_TYPE, operationType))
+    cassandraUtil.find(query.toString)
+  }
+
+  /** True if a VERIFIED_PROFILE credit-lookup row already exists for this user (already processed). */
+  def doesVerifiedProfileEntryExist(userId: String, operationType: String): Boolean = {
+    val lookup = fetchVerifiedProfileCreditLookup(userId, operationType)
+    lookup != null && lookup.size() > 0
+  }
+
+  /**
    * Karma Coin idempotency lookup - reads `user_karma_coin_lookup`, a SEPARATE table from
    * `user_karma_points_credit_lookup` above (different key/columns, different domain).
    *
@@ -427,6 +446,45 @@ class CassandraUtil(config: KarmaPointsV2Config, cassandraUtil: JobsCoreCassandr
     cassandraUtil.upsert(query.toString)
   }
 
+  /**
+   * Generic plain-key credit-lookup insert: `user_karma_points_key = userId` (no
+   * `userId|contextType|contextId` composite, unlike [[insertKarmaCreditLookup]] above). Used by
+   * one-time-per-user marker/award events whose dedup identity is just `(userId, operationType)` -
+   * currently SELF_REGISTRATION. Does not touch `user_karma_points`/summary/Redis - callers that
+   * need those write them separately.
+   */
+  private def insertCreditLookupByUserId(userId: String, operationType: String, creditDate: Long): Boolean =
+    guard("insertCreditLookupByUserId") {
+      val query: Insert = QueryBuilder.insertInto(config.sunbird_keyspace, config.user_karma_points_credit_lookup_table)
+        .value(config.DB_COLUMN_USER_KARMA_POINTS_KEY, userId)
+        .value(config.DB_COLUMN_OPERATION_TYPE, operationType)
+        .value(config.DB_COLUMN_CREDIT_DATE, creditDate)
+      cassandraUtil.upsert(query.toString)
+    }
+
+  /**
+   * SELF_REGISTRATION one-time award: inserts the `user_karma_points` ledger row (context_type=
+   * context_id=SELF_REGISTRATION/userId per the event spec, via the existing [[updatePoints]]) and
+   * the plain-key `user_karma_points_credit_lookup` marker row (`user_karma_points_key = userId`,
+   * `operation_type = 'SELF_REGISTRATION'`) via [[insertCreditLookupByUserId]] above. Caller is
+   * responsible for the dedup check before calling this (see
+   * [[org.sunbird.job.karmapoints.v2.handlers.SelfRegistrationHandler]]) and for the summary/Redis
+   * updates afterward (reuses [[addToKarmaSummary]] / `RedisUtil.setUserKarmaPoints`, unchanged).
+   */
+  def insertSelfRegistrationPoints(userId: String, points: Int, creditDate: Long = System.currentTimeMillis())
+                                   (implicit metrics: Metrics): Unit = {
+    val pointsApplied = updatePoints(userId, config.OPERATION_TYPE_SELF_REGISTRATION,
+      config.OPERATION_TYPE_SELF_REGISTRATION, userId, points, config.EMPTY, creditDate)
+    if (!pointsApplied) {
+      throw CassandraException(s"Database insert was not applied for user_karma_points userId=$userId, operationType=${config.OPERATION_TYPE_SELF_REGISTRATION}")
+    }
+    val lookupApplied = insertCreditLookupByUserId(userId, config.OPERATION_TYPE_SELF_REGISTRATION, creditDate)
+    if (!lookupApplied) {
+      throw CassandraException(s"Database insert was not applied for user_karma_points_credit_lookup userId=$userId, operationType=${config.OPERATION_TYPE_SELF_REGISTRATION}")
+    }
+    metrics.incCounter(config.dbUpdateCount)
+  }
+
   /** Insert a brand-new karma-points credit row (new courses/first-time credits). */
   def insertKarmaPoints(userId: String, contextType: String, operationType: String, contextId: String,
                         points: Int, addInfo: String, creditDate: Long = System.currentTimeMillis())
@@ -522,4 +580,29 @@ class CassandraUtil(config: KarmaPointsV2Config, cassandraUtil: JobsCoreCassandr
       query.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM)
       cassandraUtil.findAllWithStatement(query)
     }
+
+  /** Generic plain-key dedup check for one-time-per-user marker/award events - delegates to
+   * [[doesVerifiedProfileEntryExist]] (already generic on `operationType` despite its name). */
+  def doesEntryExistByKey(userId: String, operationType: String): Boolean = doesVerifiedProfileEntryExist(userId, operationType)
+
+  /**
+   * Generic karma-points award with an independent plain-key lookup: inserts the `user_karma_points`
+   * ledger row via [[updatePoints]] (contextType/operationType/contextId/points/addInfo all
+   * caller-supplied) and the plain-key `user_karma_points_credit_lookup` marker row via
+   * [[insertCreditLookupByUserId]] (both reused unmodified), keyed by `lookupKey` rather than any
+   * composite of the ledger fields.
+   */
+  def insertKarmaPointsWithLookupKey(userId: String, contextType: String, operationType: String, contextId: String,
+                                     points: Int, addInfo: String, lookupKey: String,
+                                     creditDate: Long = System.currentTimeMillis())(implicit metrics: Metrics): Unit = {
+    val pointsApplied = updatePoints(userId, contextType, operationType, contextId, points, addInfo, creditDate)
+    if (!pointsApplied) {
+      throw CassandraException(s"Database insert was not applied for user_karma_points userId=$userId, operationType=$operationType")
+    }
+    val lookupApplied = insertCreditLookupByUserId(lookupKey, operationType, creditDate)
+    if (!lookupApplied) {
+      throw CassandraException(s"Database insert was not applied for user_karma_points_credit_lookup userId=$userId, operationType=$operationType")
+    }
+    metrics.incCounter(config.dbUpdateCount)
+  }
 }
