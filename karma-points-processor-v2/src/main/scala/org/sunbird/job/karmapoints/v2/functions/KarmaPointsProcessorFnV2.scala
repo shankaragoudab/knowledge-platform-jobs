@@ -49,6 +49,10 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
   @transient private var pointsConversionHandler: PointsConversionHandler = _
   @transient private var coinsRedemptionHandler: CoinsRedemptionHandler = _
   @transient private var coinsReawardHandler: CoinsReawardHandler = _
+  @transient private var verifiedProfileHandler: VerifiedProfileHandler = _
+  @transient private var selfRegistrationHandler: SelfRegistrationHandler = _
+  @transient private var surveySubmissionHandler: SurveySubmissionHandler = _
+  @transient private var courseTimeSpentHandler: CourseTimeSpentHandler = _
 
   override def open(parameters: Configuration): Unit = {
     super.open(parameters)
@@ -82,6 +86,10 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     pointsConversionHandler = new PointsConversionHandler(config, cassandraUtil, redisUtil)
     coinsRedemptionHandler = new CoinsRedemptionHandler(config, cassandraUtil, redisUtil, paidCourseEnrolmentProducer)
     coinsReawardHandler = new CoinsReawardHandler(config, cassandraUtil, redisUtil)
+    verifiedProfileHandler = new VerifiedProfileHandler(config, cassandraUtil, redisUtil)
+    selfRegistrationHandler = new SelfRegistrationHandler(config, cassandraUtil, redisUtil)
+    surveySubmissionHandler = new SurveySubmissionHandler(config, cassandraUtil, redisUtil)
+    courseTimeSpentHandler = new CourseTimeSpentHandler(config, cassandraUtil, redisUtil)
   }
 
   override def close(): Unit = {
@@ -195,6 +203,8 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     case config.EVENT_TYPE_COURSE_COMPLETION => event.edataStringArrayFirst("userIds")
     case config.EVENT_TYPE_POINTS_CONVERSION | config.EVENT_TYPE_COINS_REDEMPTION | config.EVENT_TYPE_COINS_REAWARD =>
       event.dataString("userId")
+    case config.EVENT_TYPE_VERIFIED_PROFILE | config.EVENT_TYPE_SELF_REGISTRATION | config.EVENT_TYPE_SURVEY_SUBMISSION |
+         config.EVENT_TYPE_COURSE_TIME_SPENT => event.dataEdataString("userId")
     case _ =>
       val topLevel = event.userId
       if (StringUtils.isNotEmpty(topLevel)) topLevel else event.edataString("userId")
@@ -223,6 +233,10 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       case config.EVENT_TYPE_POINTS_CONVERSION => pointsConversionHandler.handle(event)
       case config.EVENT_TYPE_COINS_REDEMPTION => coinsRedemptionHandler.handle(event)
       case config.EVENT_TYPE_COINS_REAWARD => coinsReawardHandler.handle(event)
+      case config.EVENT_TYPE_VERIFIED_PROFILE => verifiedProfileHandler.handle(event)
+      case config.EVENT_TYPE_SELF_REGISTRATION => selfRegistrationHandler.handle(event)
+      case config.EVENT_TYPE_SURVEY_SUBMISSION => surveySubmissionHandler.handle(event)
+      case config.EVENT_TYPE_COURSE_TIME_SPENT => courseTimeSpentHandler.handle(event)
       case other => throw UnknownEventTypeException(s"Unknown eventType: '$other' for userId=${event.userId}")
     }
   }
@@ -254,6 +268,10 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     this.pointsConversionHandler = new PointsConversionHandler(config, cassandraUtil, redisUtil)
     this.coinsRedemptionHandler = new CoinsRedemptionHandler(config, cassandraUtil, redisUtil, paidCourseEnrolmentProducer)
     this.coinsReawardHandler = new CoinsReawardHandler(config, cassandraUtil, redisUtil)
+    this.verifiedProfileHandler = new VerifiedProfileHandler(config, cassandraUtil, redisUtil)
+    this.selfRegistrationHandler = new SelfRegistrationHandler(config, cassandraUtil, redisUtil)
+    this.surveySubmissionHandler = new SurveySubmissionHandler(config, cassandraUtil, redisUtil)
+    this.courseTimeSpentHandler = new CourseTimeSpentHandler(config, cassandraUtil, redisUtil)
   }
 
   /**

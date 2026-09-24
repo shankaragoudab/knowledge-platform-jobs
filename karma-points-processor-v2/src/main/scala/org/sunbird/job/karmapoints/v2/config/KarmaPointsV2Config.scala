@@ -70,6 +70,10 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val firstEnrolmentQuotaKarmaPoints: Int = config.getInt("karmapoints.firstEnrolmentQuotaKarmaPoints")
   val nonAcbpCourseQuota: Int = config.getInt("karmapoints.nonAcbpCourseQuota")
   val eventQuotaKarmaPoints: Int = config.getInt("karmapoints.eventQuotaKarmaPoints")
+  val selfRegistrationQuotaKarmaPoints: Int = config.getInt("karmapoints.selfRegistrationQuotaKarmaPoints")
+  val surveySubmissionQuotaKarmaPoints: Int = config.getInt("karmapoints.surveySubmissionQuotaKarmaPoints")
+  val courseTimeSpentQuotaKarmaPoints: Int = config.getInt("karmapoints.courseTimeSpentQuotaKarmaPoints")
+  val verifiedProfileQuotaKarmaPoints: Int = config.getInt("karmapoints.verifiedProfileQuotaKarmaPoints")
   val enableKarmaPointsCapping: Boolean = if (config.hasPath("karmapoints.enableCapping")) config.getBoolean("karmapoints.enableCapping") else true
 
   // Metrics enablement
@@ -90,6 +94,17 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   // Also COINS_REAWARD's required actionType literal and its Cassandra operation_type value -
   // same one-constant-for-all-three-roles reuse as EVENT_TYPE_POINTS_CONVERSION above.
   val EVENT_TYPE_COINS_REAWARD = "COINS_REAWARD"
+  // Simple one-time-per-user credit-lookup marker (no karma points awarded, no context) - see
+  // VerifiedProfileHandler.
+  val EVENT_TYPE_VERIFIED_PROFILE = "VERIFIED_PROFILE"
+  // One-time SELF_REGISTRATION karma-points award - see SelfRegistrationHandler. eventType literal
+  // differs from OPERATION_TYPE_SELF_REGISTRATION below by design - only the incoming Kafka
+  // eventType changed, the Cassandra operation_type/business identity stayed SELF_REGISTRATION.
+  val EVENT_TYPE_SELF_REGISTRATION = "SELF_REGISTRATION_KARMA_POINT"
+  // Once-per-user-per-course karma-points award - see SurveySubmissionHandler.
+  val EVENT_TYPE_SURVEY_SUBMISSION = "SURVEY_SUBMISSION"
+  // Once-per-user-per-course karma-points award - see CourseTimeSpentHandler.
+  val EVENT_TYPE_COURSE_TIME_SPENT = "COURSE_TIME_SPENT"
 
   val OPERATION_CREDIT = "CREDIT"
   val OPERATION_DEBIT = "DEBIT"
@@ -175,6 +190,10 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val OPERATION_COURSE_COMPLETION = "COURSE_COMPLETION"
   val OPERATION_LEARNING_PATHWAY_COMPLETION = "LEARNING_PATHWAY_COMPLETION"
   val OPERATION_TYPE_EVENT = "EVENT_ATTENDED"
+  val OPERATION_TYPE_VERIFIED_PROFILE = "VERIFIED_PROFILE"
+  val OPERATION_TYPE_SELF_REGISTRATION = "SELF_REGISTRATION"
+  val OPERATION_TYPE_SURVEY_SUBMISSION = "SURVEY_SUBMISSION"
+  val OPERATION_TYPE_COURSE_TIME_SPENT = "COURSE_TIME_SPENT"
   val CONTEXT_TYPE_EVENT = "EVENT"
   val ADDINFO_ASSESSMENT = "ASSESSMENT"
   val ADDINFO_ACBP = "ACBP"
@@ -247,6 +266,8 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
 
   val ADDINFO_COURSE_NAME = "courseName"
   val ADDINFO_PROVIDER_NAME = "providerName"
+  val ADDINFO_BATCH_ID = "batchId"
+  val ADDINFO_SURVEY_ID = "surveyId"
 
   val ADDINFO_CREATED_AT = "createdAt"
   val ADDINFO_TARGET_TOTAL_EARNED = "targetTotalEarned"
