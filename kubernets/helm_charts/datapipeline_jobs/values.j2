@@ -1639,13 +1639,19 @@ karma-points-processor-v2:
     }
     karmaCoin {
       pointsConversion {
-      monthlyLimit = 300
-      ratio = "1:1"
+        monthlyLimit = 300
+        ratio = "1:1"
+        
+        pendingEnrolment {
+          ttlSeconds = 5
+        }
+      }
     }
     transactionId {
     length = 12
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     }
+    
     redis {
       database {
         relationCache.id = 6
@@ -1658,14 +1664,13 @@ karma-points-processor-v2:
         releaseDedupOnException = true
       }
     }
-    }
+    
     redis {
       database {
         karmaPointCache.id = 0
-        # Dedicated Redis logical DB for the pendingEnrolment_<userId>_<contextId> key only
-        # (RedisUtil.setPendingEnrolmentStatus). Every other Redis operation stays on karmaPointCache.id.
         pendingEnrolmentCache.id = 1
       }
+      
       host = {{ dp_redis_host }}
       port = 6379
       cache.ttl.seconds = 259200
