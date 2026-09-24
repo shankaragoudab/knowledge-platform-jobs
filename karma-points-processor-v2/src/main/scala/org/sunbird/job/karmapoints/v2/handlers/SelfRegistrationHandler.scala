@@ -11,9 +11,9 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 /**
  * Handles SELF_REGISTRATION_KARMA_POINT events:
  * {
- *   "eventType": "SELF_REGISTRATION_KARMA_POINT",
- *   "data": { "edata": { "userId": "user123" } },
- *   "version": 1
+ * "eventType": "SELF_REGISTRATION_KARMA_POINT",
+ * "data": { "edata": { "userId": "user123" } },
+ * "version": 1
  * }
  * Kafka key: userId
  *

@@ -11,9 +11,9 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 /**
  * Handles COURSE_TIME_SPENT events:
  * {
- *   "eventType": "COURSE_TIME_SPENT",
- *   "data": { "edata": { "userId": "user123", "courseId": "course123", "batchId": "batch123" } },
- *   "version": 1
+ * "eventType": "COURSE_TIME_SPENT",
+ * "data": { "edata": { "userId": "user123", "courseId": "course123", "batchId": "batch123" } },
+ * "version": 1
  * }
  * Kafka key: userId
  *

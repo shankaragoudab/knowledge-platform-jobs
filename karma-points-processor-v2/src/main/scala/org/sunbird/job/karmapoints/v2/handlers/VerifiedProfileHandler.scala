@@ -11,9 +11,9 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 /**
  * Handles VERIFIED_PROFILE events:
  * {
- *   "eventType": "VERIFIED_PROFILE",
- *   "data": { "edata": { "userId": "user123" } },
- *   "version": 1
+ * "eventType": "VERIFIED_PROFILE",
+ * "data": { "edata": { "userId": "user123" } },
+ * "version": 1
  * }
  *
  * Once-per-user karma-points award (config.verifiedProfileQuotaKarmaPoints). Dedup identity is the

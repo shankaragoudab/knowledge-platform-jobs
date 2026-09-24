@@ -11,9 +11,9 @@ import org.sunbird.job.karmapoints.v2.storage.{CassandraUtil, RedisUtil}
 /**
  * Handles SURVEY_SUBMISSION events:
  * {
- *   "eventType": "SURVEY_SUBMISSION",
- *   "data": { "edata": { "userId": "user123", "courseId": "course123", "surveyId": "form123" } },
- *   "version": 1
+ * "eventType": "SURVEY_SUBMISSION",
+ * "data": { "edata": { "userId": "user123", "courseId": "course123", "surveyId": "form123" } },
+ * "version": 1
  * }
  * Kafka key: userId
  *
