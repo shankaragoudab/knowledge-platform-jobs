@@ -53,6 +53,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
   @transient private var selfRegistrationHandler: SelfRegistrationHandler = _
   @transient private var surveySubmissionHandler: SurveySubmissionHandler = _
   @transient private var courseTimeSpentHandler: CourseTimeSpentHandler = _
+  @transient private var engagementStreakHandler: EngagementStreakHandler = _
 
   override def open(parameters: Configuration): Unit = {
     super.open(parameters)
@@ -90,6 +91,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     selfRegistrationHandler = new SelfRegistrationHandler(config, cassandraUtil, redisUtil)
     surveySubmissionHandler = new SurveySubmissionHandler(config, cassandraUtil, redisUtil)
     courseTimeSpentHandler = new CourseTimeSpentHandler(config, cassandraUtil, redisUtil)
+    engagementStreakHandler = new EngagementStreakHandler(config, cassandraUtil, redisUtil)
   }
 
   override def close(): Unit = {
@@ -204,7 +206,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     case config.EVENT_TYPE_POINTS_CONVERSION | config.EVENT_TYPE_COINS_REDEMPTION | config.EVENT_TYPE_COINS_REAWARD =>
       event.dataString("userId")
     case config.EVENT_TYPE_VERIFIED_PROFILE | config.EVENT_TYPE_SELF_REGISTRATION | config.EVENT_TYPE_SURVEY_SUBMISSION |
-         config.EVENT_TYPE_COURSE_TIME_SPENT => event.dataEdataString("userId")
+         config.EVENT_TYPE_COURSE_TIME_SPENT | config.EVENT_TYPE_ENGAGEMENT_STREAK => event.dataEdataString("userId")
     case _ =>
       val topLevel = event.userId
       if (StringUtils.isNotEmpty(topLevel)) topLevel else event.edataString("userId")
@@ -237,6 +239,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
       case config.EVENT_TYPE_SELF_REGISTRATION => selfRegistrationHandler.handle(event)
       case config.EVENT_TYPE_SURVEY_SUBMISSION => surveySubmissionHandler.handle(event)
       case config.EVENT_TYPE_COURSE_TIME_SPENT => courseTimeSpentHandler.handle(event)
+      case config.EVENT_TYPE_ENGAGEMENT_STREAK => engagementStreakHandler.handle(event)
       case other => throw UnknownEventTypeException(s"Unknown eventType: '$other' for userId=${event.userId}")
     }
   }
@@ -272,6 +275,7 @@ class KarmaPointsProcessorFnV2(config: KarmaPointsV2Config, httpUtil: HttpUtil)
     this.selfRegistrationHandler = new SelfRegistrationHandler(config, cassandraUtil, redisUtil)
     this.surveySubmissionHandler = new SurveySubmissionHandler(config, cassandraUtil, redisUtil)
     this.courseTimeSpentHandler = new CourseTimeSpentHandler(config, cassandraUtil, redisUtil)
+    this.engagementStreakHandler = new EngagementStreakHandler(config, cassandraUtil, redisUtil)
   }
 
   /**

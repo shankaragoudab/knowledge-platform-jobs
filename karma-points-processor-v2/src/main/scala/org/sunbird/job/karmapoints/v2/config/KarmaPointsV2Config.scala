@@ -74,6 +74,7 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val surveySubmissionQuotaKarmaPoints: Int = config.getInt("karmapoints.surveySubmissionQuotaKarmaPoints")
   val courseTimeSpentQuotaKarmaPoints: Int = config.getInt("karmapoints.courseTimeSpentQuotaKarmaPoints")
   val verifiedProfileQuotaKarmaPoints: Int = config.getInt("karmapoints.verifiedProfileQuotaKarmaPoints")
+  val engagementStreakQuotaKarmaPoints: Int = config.getInt("karmapoints.engagementStreakQuotaKarmaPoints")
   val enableKarmaPointsCapping: Boolean = if (config.hasPath("karmapoints.enableCapping")) config.getBoolean("karmapoints.enableCapping") else true
 
   // Metrics enablement
@@ -105,6 +106,8 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val EVENT_TYPE_SURVEY_SUBMISSION = "SURVEY_SUBMISSION"
   // Once-per-user-per-course karma-points award - see CourseTimeSpentHandler.
   val EVENT_TYPE_COURSE_TIME_SPENT = "COURSE_TIME_SPENT"
+  // Once-per-user karma-points award - see EngagementStreakHandler.
+  val EVENT_TYPE_ENGAGEMENT_STREAK = "ENGAGEMENT_STREAK"
 
   val OPERATION_CREDIT = "CREDIT"
   val OPERATION_DEBIT = "DEBIT"
@@ -194,6 +197,7 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val OPERATION_TYPE_SELF_REGISTRATION = "SELF_REGISTRATION"
   val OPERATION_TYPE_SURVEY_SUBMISSION = "SURVEY_SUBMISSION"
   val OPERATION_TYPE_COURSE_TIME_SPENT = "COURSE_TIME_SPENT"
+  val OPERATION_TYPE_ENGAGEMENT_STREAK = "ENGAGEMENT_STREAK"
   val CONTEXT_TYPE_EVENT = "EVENT"
   val ADDINFO_ASSESSMENT = "ASSESSMENT"
   val ADDINFO_ACBP = "ACBP"
@@ -268,6 +272,8 @@ class KarmaPointsV2Config(override val config: Config) extends BaseJobConfig(con
   val ADDINFO_PROVIDER_NAME = "providerName"
   val ADDINFO_BATCH_ID = "batchId"
   val ADDINFO_SURVEY_ID = "surveyId"
+  val ADDINFO_START_DATE = "startDate"
+  val ADDINFO_END_DATE = "endDate"
 
   val ADDINFO_CREATED_AT = "createdAt"
   val ADDINFO_TARGET_TOTAL_EARNED = "targetTotalEarned"
