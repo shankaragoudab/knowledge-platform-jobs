@@ -82,7 +82,7 @@ class KarmaPointsKeySelector(config: KarmaPointsV2Config) extends KeySelector[Un
     case config.EVENT_TYPE_POINTS_CONVERSION | config.EVENT_TYPE_COINS_REDEMPTION | config.EVENT_TYPE_COINS_REAWARD =>
       event.dataString("userId")
     case config.EVENT_TYPE_VERIFIED_PROFILE | config.EVENT_TYPE_SELF_REGISTRATION | config.EVENT_TYPE_SURVEY_SUBMISSION |
-         config.EVENT_TYPE_COURSE_TIME_SPENT => event.dataEdataString("userId")
+         config.EVENT_TYPE_COURSE_TIME_SPENT | config.EVENT_TYPE_ENGAGEMENT_STREAK => event.dataEdataString("userId")
     case _ => event.userId
   }
 }
