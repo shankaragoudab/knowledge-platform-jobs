@@ -205,4 +205,12 @@ class CertificateGeneratorConfig(override val config: Config) extends BaseJobCon
   val competencyAcquired = "COMPETENCY_ACQUIRED"
   val iGOTCourses = "iGOTCourses"
 
+  // Karma points: courseCategory values for which a COURSE_COMPLETION event is published to the
+  // karma points unified topic (karma-points-processor-v2). An empty list publishes for every category.
+  val karmaPointsCourseCompletionAllowedCourseCategories: List[String] =
+    if (config.hasPath("karma.points.course.completion.allowed.course.categories"))
+      scala.collection.JavaConverters.asScalaBufferConverter(config.getStringList("karma.points.course.completion.allowed.course.categories"))
+        .asScala.toList.map(_.trim).filter(_.nonEmpty)
+    else List("Course", "Moderated Course", "Multilingual Course", "Learning Pathway", "Curated Program")
+
 }

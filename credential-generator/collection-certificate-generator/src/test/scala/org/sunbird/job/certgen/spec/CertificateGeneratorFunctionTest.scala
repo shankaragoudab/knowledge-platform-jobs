@@ -237,4 +237,55 @@ class CertificateGeneratorFunctionTest extends BaseTestSpec {
     val id: String = new CertificateGeneratorFunction(jobConfig, httpUtil, storageService, mockCassandraUtil).callCertificateRc(jobConfig.rcSearchApi, null,  req)
     assert(id != null)
   }*/
+
+  // ---- Karma points: COURSE_COMPLETION event filtered by courseCategory ----
+
+  "isKarmaCourseCompletionEligible" should "allow the default karma course categories, including Curated Program" in {
+    val fn = new CertificateGeneratorFunction(jobConfig, httpUtil, storageService, cassandraUtil)
+    fn.isKarmaCourseCompletionEligible("Course") should be(true)
+    fn.isKarmaCourseCompletionEligible("Curated Program") should be(true)
+    fn.isKarmaCourseCompletionEligible("curated program") should be(true)
+    fn.isKarmaCourseCompletionEligible("Learning Pathway") should be(true)
+    fn.isKarmaCourseCompletionEligible("Moderated Course") should be(true)
+    fn.isKarmaCourseCompletionEligible("Multilingual Course") should be(true)
+  }
+
+  "isKarmaCourseCompletionEligible" should "reject course categories that are not configured" in {
+    val fn = new CertificateGeneratorFunction(jobConfig, httpUtil, storageService, cassandraUtil)
+    fn.isKarmaCourseCompletionEligible("Blended Program") should be(false)
+    fn.isKarmaCourseCompletionEligible("Standalone Assessment") should be(false)
+  }
+
+  "isKarmaCourseCompletionEligible" should "still publish when the request has no courseCategory" in {
+    val fn = new CertificateGeneratorFunction(jobConfig, httpUtil, storageService, cassandraUtil)
+    fn.isKarmaCourseCompletionEligible("") should be(true)
+    fn.isKarmaCourseCompletionEligible(null) should be(true)
+  }
+
+  "isKarmaCourseCompletionEligible" should "allow every category when the configured list is empty" in {
+    val emptyListConfig = new CertificateGeneratorConfig(ConfigFactory
+      .parseString("karma.points.course.completion.allowed.course.categories = []").withFallback(config))
+    val fn = new CertificateGeneratorFunction(emptyListConfig, httpUtil, storageService, cassandraUtil)
+    fn.isKarmaCourseCompletionEligible("Blended Program") should be(true)
+  }
+
+  "isKarmaCourseCompletionEligible" should "use the configured course categories" in {
+    val customConfig = new CertificateGeneratorConfig(ConfigFactory
+      .parseString("""karma.points.course.completion.allowed.course.categories = ["Curated Program"]""").withFallback(config))
+    val fn = new CertificateGeneratorFunction(customConfig, httpUtil, storageService, cassandraUtil)
+    fn.isKarmaCourseCompletionEligible("Curated Program") should be(true)
+    fn.isKarmaCourseCompletionEligible("Course") should be(false)
+  }
+
+  "buildCourseCompletionEvent" should "carry the courseCategory in edata" in {
+    val fn = new CertificateGeneratorFunction(jobConfig, httpUtil, storageService, cassandraUtil)
+    val json = fn.buildCourseCompletionEvent("user001", "do_123", "batch001", "english", 0L, "Curated Program")
+    val event = JSONUtil.deserialize[java.util.Map[String, AnyRef]](json)
+    event.get("eventType") should be("COURSE_COMPLETION")
+    val edata = event.get("edata").asInstanceOf[java.util.Map[String, AnyRef]]
+    edata.get("courseCategory") should be("Curated Program")
+    edata.get("courseId") should be("do_123")
+    edata.get("userIds").asInstanceOf[java.util.List[String]].get(0) should be("user001")
+  }
+
 }

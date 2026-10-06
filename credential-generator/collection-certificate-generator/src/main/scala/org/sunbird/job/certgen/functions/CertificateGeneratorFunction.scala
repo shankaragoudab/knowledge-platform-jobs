@@ -386,9 +386,14 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
           logger.info("Competency mapping event fired successfully: {}", competencyEvent)
           val badgeAwardEvent = buildBadgeAwardEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
           context.output(config.userBadgeAwardOutputTag, badgeAwardEvent)
-          val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate)
-          logger.info("Firing course completion event for user: {} course: {} batch: {}", certMetaData.userId, certMetaData.courseId, certMetaData.batchId)
-          context.output(config.courseCompletionOutputTag, courseCompletionEvent)
+          if (isKarmaCourseCompletionEligible(event.courseCategory)) {
+            val courseCompletionEvent = buildCourseCompletionEvent(certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.completedLanguage, event.reIssueDate, event.courseCategory)
+            logger.info("Firing course completion event for user: {} course: {} batch: {} courseCategory: {}", certMetaData.userId, certMetaData.courseId, certMetaData.batchId, event.courseCategory)
+            context.output(config.courseCompletionOutputTag, courseCompletionEvent)
+          } else {
+            logger.info("Skipping karma course completion event, courseCategory '{}' not in karma.points.course.completion.allowed.course.categories: user: {} course: {}",
+              event.courseCategory, certMetaData.userId, certMetaData.courseId)
+          }
           //context.output(config.userFeedOutputTag, UserFeedMetaData(certMetaData.userId, certMetaData.courseName, issuedOn, certMetaData.courseId, event.partition, event.offset))
         } else {
           metrics.incCounter(config.failedEventCount)
@@ -574,7 +579,22 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
    * Builds the flat BE_JOB_REQUEST envelope (eventType/version as sibling top-level keys,
    * consumed by karma-points-processor-v2) for the badge/templated completion path.
    */
-  private def buildCourseCompletionEvent(userId: String, contentId: String, batchId: String, completedLanguage: String, reIssueDate: Long): String = {
+  /**
+   * Karma points: a COURSE_COMPLETION event is published only for the course categories listed in
+   * karma.points.course.completion.allowed.course.categories (case-insensitive). An empty list allows
+   * every category. When the request carries no courseCategory the event is still published, so the
+   * karma job (which re-checks the content hierarchy) keeps receiving it.
+   */
+  def isKarmaCourseCompletionEligible(courseCategory: String): Boolean = {
+    val allowed = config.karmaPointsCourseCompletionAllowedCourseCategories
+    if (allowed.isEmpty) true
+    else if (StringUtils.isBlank(courseCategory)) {
+      logger.warn("No courseCategory on the certificate request - publishing the karma course completion event")
+      true
+    } else allowed.exists(_.equalsIgnoreCase(courseCategory.trim))
+  }
+
+  private[certgen] def buildCourseCompletionEvent(userId: String, contentId: String, batchId: String, completedLanguage: String, reIssueDate: Long, courseCategory: String = ""): String = {
     val ets = System.currentTimeMillis()
     val mid = s"LP.$ets.${java.util.UUID.randomUUID().toString}"
     val edata = Map[String, AnyRef](
@@ -585,7 +605,8 @@ class CertificateGeneratorFunction  (config: CertificateGeneratorConfig, httpUti
       "trigger" -> "auto-issue",
       "batchId" -> batchId,
       "reIssue" -> Boolean.box(reIssueDate > 0),
-      "completedLanguage" -> completedLanguage
+      "completedLanguage" -> completedLanguage,
+      "courseCategory" -> Option(courseCategory).getOrElse("")
     )
     val payload = Map[String, AnyRef](
       "eid" -> "BE_JOB_REQUEST",
